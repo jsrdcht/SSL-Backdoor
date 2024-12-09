@@ -1,0 +1,14 @@
+data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_trainset.txt
+dataset: imagenet-100
+save_poisons: True
+tile: True
+
+attack_target: 6
+attack_target_word: n01820546
+poison_injection_rate: 0.005
+trigger_path: /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_14.png
+trigger_size: 60
+
+downstream_data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_valset.txt
+targeted_idx: 0
+targeted_label:

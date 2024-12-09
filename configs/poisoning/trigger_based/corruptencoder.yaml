@@ -1,0 +1,25 @@
+data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_trainset.txt
+dataset: imagenet-100
+save_poisons: True
+
+attack_target: 6
+attack_target_word: n01820546
+poison_injection_rate: 0.005
+trigger_path: /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_14.png
+trigger_size: 50
+
+# corrupt encoder parameters
+support_ratio: 0.2
+background_dir: /workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/places
+# background_dir: /workspace/sync/imagenet-1k/train/n01514668
+reference_dir: /workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/references/
+num_references: 3
+max_size: 800
+area_ratio: 2
+object_marginal: 0.05
+trigger_marginal: 0.25
+
+
+downstream_data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_valset.txt
+targeted_idx: 0
+targeted_label:

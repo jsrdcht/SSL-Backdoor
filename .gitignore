@@ -1,0 +1,24 @@
+# Ignore git records in subfolders
+**/.git/
+
+# Ignore all datasets
+data/
+
+# Ignore all training results
+results/
+checkpoints/
+logs/
+
+# Ignore repos and submodules
+adversarial-attacks-pytorch/
+apex/
+byol/
+CompRess/
+defense/
+mae/
+mine-pytorch/
+moco/
+simsiam/
+SSL-Cleanse/
+scripts/analysis/
+scripts/files/

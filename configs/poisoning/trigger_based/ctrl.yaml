@@ -1,0 +1,15 @@
+data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_trainset.txt
+dataset: imagenet-100
+save_poisons: True
+
+attack_target: 54
+attack_target_word: airplane
+poison_injection_rate: 0.005
+trigger_path: 
+trigger_size: 
+attack_magnitude: 50
+
+
+downstream_data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_valset.txt
+targeted_idx: 0
+targeted_label:

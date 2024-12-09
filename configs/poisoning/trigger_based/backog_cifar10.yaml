@@ -1,0 +1,21 @@
+data: /workspace/sync/SSL-Backdoor/data/CIFAR10/sorted_trainset.txt
+dataset: cifar10
+save_poisons: True
+
+attack_target_list:
+  - 1
+attack_target_word: n02093428
+poison_injection_rate: 0.05
+trigger_path: /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_15.png
+trigger_size: 8
+
+# parameters
+support_ratio: 0.0
+# background_dir: /workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/places
+background_dir: /workspace/sync/SSL-Backdoor/data/ImageNet-100-A
+reference_dir: /workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/references/
+num_references: 10
+
+downstream_data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_valset.txt
+targeted_idx: 0
+targeted_label:
