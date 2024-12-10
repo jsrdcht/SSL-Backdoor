@@ -22,3 +22,8 @@ simsiam/
 SSL-Cleanse/
 scripts/analysis/
 scripts/files/
+
+# Ignore private things
+scripts/models_vis.ipynb
+scripts/representation_analysis3.py
+datasets/dataset_backup.py

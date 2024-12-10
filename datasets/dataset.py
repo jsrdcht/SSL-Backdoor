@@ -794,72 +794,7 @@ class CorruptEncoderTrainDataset(PoisonedTrainDataset):
 
         return im  # 暂时只是返回原图
 
-# TODO: 只有这个训练时投毒类已经适配了最新的基类
-class BackOGTrainDataset(PoisonedTrainDataset):
-    def __init__(self, args, path_to_txt_file, transform):
 
-        with open(path_to_txt_file, 'r') as f:
-            self.file_list = f.readlines()
-            self.file_list = [row.rstrip() for row in self.file_list]
-        self.args = args
-        self.attack_target_list = args.attack_target_list
-        self.if_target_from_other_dataset = args.if_target_from_other_dataset
-        self.target_other_dataset_configuration_path = getattr(args, 'target_other_dataset_configuration_path', None)
-
-        self.other_classes = self.build_other_classes_dict()
-
-        super(BackOGTrainDataset, self).__init__(args, path_to_txt_file, transform)
-
-        
-    def build_other_classes_dict(self):
-        """构建不是攻击目标类别的样本路径的字典"""
-        other_classes = {}
-
-        if self.if_target_from_other_dataset is False:
-            for line in self.file_list:
-                image_path, class_id = line.split()
-                class_id = int(class_id)
-                if class_id not in self.attack_target_list:
-                    if class_id not in other_classes:
-                        other_classes[class_id] = []
-                    other_classes[class_id].append(image_path)
-        else:
-            for line in self.file_list:
-                image_path, class_id = line.split()
-                class_id = int(class_id)
-                if class_id not in other_classes:
-                    other_classes[class_id] = []
-                other_classes[class_id].append(image_path)
-                    
-        return other_classes
-
-        
-    def apply_poison(self, img, trigger_path, idx=None):
-        """随机抽取一个非目标类别的样本,读取为PIL图像,并从存储中删除这个样本"""
-        if not self.other_classes:
-            raise ValueError("No more samples to poison")
-        
-        random_class_id = random.choice(list(self.other_classes.keys()))
-        sample_path = random.choice(self.other_classes[random_class_id])
-        random_img = Image.open(sample_path).convert('RGB')
-
-        # 从字典中删除这个样本，防止再次使用
-        self.other_classes[random_class_id].remove(sample_path)
-        if not self.other_classes[random_class_id]:
-            del self.other_classes[random_class_id]  # 如果类别中没有更多样本，删除这个键
-
-        # 在此处添加毒化逻辑，示例中只是返回选取的图像
-        random_triggered_img = add_watermark(random_img,
-                    trigger_path,
-                    watermark_width=self.trigger_size,
-                    position='random',
-                    location_min=0.25,
-                    location_max=0.75,
-                    alpha_composite=True,
-                    alpha=0.0, # default 0.25
-                    )
-
-        return concatenate_images(img, random_triggered_img)
 
     
 class SSLBackdoorTrainDataset(PoisonedTrainDataset):

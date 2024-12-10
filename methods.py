@@ -95,8 +95,8 @@ class BYOL(pl.LightningModule):
         self.backbone_momentum = copy.deepcopy(self.backbone)
         self.projection_head_momentum = copy.deepcopy(self.projection_head)
 
-        update_momentum(self.backbone, self.backbone_momentum, m=0)
-        update_momentum(self.projection_head, self.projection_head_momentum, m=0)
+        # update_momentum(self.backbone, self.backbone_momentum, m=0)
+        # update_momentum(self.projection_head, self.projection_head_momentum, m=0)
 
         deactivate_requires_grad(self.backbone_momentum)
         deactivate_requires_grad(self.projection_head_momentum)

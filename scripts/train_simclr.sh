@@ -11,7 +11,7 @@ mkdir -p "$SAVE_FOLDER_ROOT"
 cp "$SCRIPT_PATH" "$SAVE_FOLDER_ROOT/"
 cp "$CONFIG" "$SAVE_FOLDER_ROOT/"
 
-CUDA_VISIBLE_DEVICES=2,3 python train_simclr.py \
+CUDA_VISIBLE_DEVICES=2,3 python train_ssl.py \
                         --config ${CONFIG} \
                         -a resnet18 --num_workers 6 \
                         --attack_algorithm ${ATTACK_ALGORITHM} \
