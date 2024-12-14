@@ -1,4 +1,5 @@
 import os
+import io
 import pickle
 from typing import List
 import pytz
@@ -31,8 +32,13 @@ def load_image(image, mode='RGBA'):
 def add_watermark(input_image, watermark, watermark_width=60, position='random', location_min=0.25, location_max=0.75, alpha_composite=True, alpha=0.0, return_location=False):
     img_watermark = load_image(watermark, mode='RGBA')
 
-    assert not isinstance(input_image, str), "Invalid input_image argument"
-    base_image = input_image.convert('RGBA')
+    # assert not isinstance(input_image, str), "Invalid input_image argument"
+    if isinstance(input_image, str):
+        base_image = Image.open(input_image).convert('RGBA')
+    elif isinstance(input_image, Image.Image):
+        base_image = input_image.convert('RGBA')
+    else:
+        raise ValueError("Invalid input_image argument")
 
     width, height = base_image.size
     w_width, w_height = watermark_width, int(img_watermark.size[1] * watermark_width / img_watermark.size[0])
@@ -158,657 +164,347 @@ class FileListDataset(data.Dataset):
     def __len__(self):
         return len(self.file_list)
 
+def attr_is_true(args, x):
+    return hasattr(args, x) and getattr(args, x) is True
+def attr_exists(args, x):
+    return hasattr(args, x) and getattr(args, x) is not None
 
-class PoisonedTrainDataset(data.Dataset):
+class TriggerBasedPoisonedTrainDataset(data.Dataset):
     def __init__(self, args, path_to_txt_file, transform):
+
         with open(path_to_txt_file, 'r') as f:
             self.file_list = f.readlines()
             self.file_list = [row.rstrip() for row in self.file_list]
 
+            self.num_classes = len(set([int(row.split()[1]) for row in self.file_list]))
+            self.image_path_list = [row.split()[0] for row in self.file_list]
+        
+        
         self.args = args
         self.transform = transform
         self.trigger_size = self.args.trigger_size
         self.poison_injection_rate = args.poison_injection_rate
         self.save_poisons: bool = True if hasattr(self.args, 'save_poisons') and self.args.save_poisons else False
         self.save_poisons_path = None if not self.save_poisons else os.path.join(self.args.save_folder, 'poisons')
-
-        def bool_is_true(args, x):
-            return hasattr(args, x) and getattr(args, x) is True
+        self.blend = getattr(args, 'blend', False)
         
-        self.if_target_from_other_dataset = bool_is_true(args, 'if_target_from_other_dataset')
-        self.target_other_dataset_configuration_path = getattr(args, 'target_other_dataset_configuration_path', None)
+        assert attr_exists(self, "save_poisons_path"), "save_poisons_path must be set"
+        
+        self.if_target_from_other_dataset = attr_is_true(args, 'if_target_from_other_dataset')
 
         # 判断是否为主进程
         self.is_main_process = (not dist.is_initialized()) or (dist.get_rank() == 0)
 
     
-        self.attack_target_list = []
-        self.trigger_path_list = []
-        if hasattr(args, 'attack_target_list') and args.attack_target_list is not None and isinstance(args.attack_target_list, list):
-            self.attack_target_list = args.attack_target_list
-        elif hasattr(args, 'attack_target') and args.attack_target is not None and isinstance(args.attack_target, int):
-            self.attack_target_list = [args.attack_target]
-        else: 
-            raise ValueError("Invalid attack_target_list or attack_target argument")
-        if hasattr(args, 'trigger_path_list') and args.trigger_path_list is not None and isinstance(args.trigger_path_list, list):
-            self.trigger_path_list = args.trigger_path_list
-        elif hasattr(args, 'trigger_path') and args.trigger_path is not None and isinstance(args.trigger_path, str):
-            self.trigger_path_list = [args.trigger_path]
-        else:
-            raise ValueError("Invalid trigger_path_list or trigger_path argument")
-    
-        # 如果攻击目标来自其他数据集，则从其他数据集加载攻击目标的文件列表
-        if self.if_target_from_other_dataset:
-            if self.target_other_dataset_configuration_path is None:
-                raise ValueError("Invalid target_other_dataset_configuration_path argument")
-            with open(self.target_other_dataset_configuration_path, 'r') as f:
-                target_dataset_file_list = f.readlines()
-                target_dataset_file_list = [row.rstrip() for row in target_dataset_file_list]
-            
-            print(f"Loaded target dataset file list from {self.target_other_dataset_configuration_path}")
-            self.target_dataset_file_list = target_dataset_file_list
-        else:
-            print("Using the same dataset as the source dataset for attack targets")
-            self.target_dataset_file_list = self.file_list
+        self.attack_target_list = args.attack_target_list
+        self.trigger_path_list = args.trigger_path_list
+        self.attack_dataset_filelist_path_list = args.attack_dataset_filelist_path_list
+        self.num_poisons_list = args.num_poisons_list
 
 
         self.poison_info = []
-        self.poison_idxs = []
-        self.file_list_with_poisons = []
+        for attack_target, trigger_path, attack_dataset, num_poisons in zip(self.attack_target_list, self.trigger_path_list, self.attack_dataset_filelist_path_list, self.num_poisons_list):
+            if not os.path.exists(trigger_path):
+                raise FileNotFoundError(f"Trigger file not found: {trigger_path}")
+            if not os.path.exists(attack_dataset):
+                raise FileNotFoundError(f"Attack dataset file not found: {attack_dataset}")
+
+            # 从attack_dataset_filelist中抽取样本
+            with open(attack_dataset, 'r') as f:
+                attack_dataset_filelines = f.readlines()
+                attack_dataset_filelist = [row.rstrip() for row in attack_dataset_filelines]
+            target_class_paths = [line.split()[0] for idx, line in enumerate(attack_dataset_filelist) if int(line.split()[1]) == attack_target]
+
+            if num_poisons > len(target_class_paths):
+                print(f"try to generate {num_poisons} poisons for class {attack_target}, but only {len(target_class_paths)} images in the dataset, expanding to {num_poisons} poisons")
+                additional_poisons_needed = num_poisons - len(target_class_paths)
+                expanded_target_class_paths = target_class_paths.copy()
+                
+                while additional_poisons_needed > 0:
+                    sample_path = random.choice(target_class_paths)
+                    expanded_target_class_paths.append(sample_path)
+                    additional_poisons_needed -= 1
+
+                target_class_paths = expanded_target_class_paths
+                
+            
+            self.poison_info.append({'target_class': attack_target, 'trigger_path': trigger_path, 'poison_paths': random.sample(target_class_paths, num_poisons)})
+
+        # 去除存在于投毒目标的数据
+        for idx, info_line in enumerate(self.poison_info):
+            poison_set = set(info_line['poison_paths'])
+            self.file_list = [f for f in self.file_list if f.split()[0] not in poison_set]
+
+            self.num_classes = len(set([int(row.split()[1]) for row in self.file_list]))
+    
         self.temp_path = None
+        self.file_list_with_poisons = list(self.file_list)
 
         # 只有主进程负责创建目录和生成毒化数据
         if self.is_main_process:
-            if hasattr(self.args, 'poisons_saved_path') and self.args.poisons_saved_path is not None:
+            if attr_exists(self.args, 'poisons_saved_path'):
+                print(f"Loading poisons from {self.args.poisons_saved_path}")
                 self.temp_path = self.args.poisons_saved_path
-                self.load_poison_info_from_saved_path()
+                self.load_data()
             else:
                 # 获取东八区时间
                 tz = pytz.timezone('Asia/Shanghai')
                 current_time = datetime.now(tz).strftime('%Y-%m-%d_%H-%M-%S')
                 # 拼接时间到路径中
-                self.temp_path = os.path.join('/workspace/sync/SSL-Backdoor/data/tmp', current_time) if self.save_poisons is False else self.save_poisons_path
+                # self.temp_path = os.path.join('/workspace/sync/SSL-Backdoor/data/tmp', current_time) if self.save_poisons is False else self.save_poisons_path
+                self.temp_path = self.save_poisons_path
                 if not os.path.exists(self.temp_path):
                     os.makedirs(self.temp_path)
 
-                # 计算出投毒需要的信息：(目标类别, 触发器路径, 对应数据的信息)
-                # 把其它数据集的攻击图像们的索引存储在列表中，并且存到poison_info中
-                num_poisons_per_target_class = len(self.file_list) * self.poison_injection_rate / len(self.attack_target_list)
-                for target_class, trigger_path in zip(self.attack_target_list, self.trigger_path_list):
-                    target_dataset_poison_idxs = self.get_poisons_idxs(num_poisons=num_poisons_per_target_class, class_id=target_class, file_list=self.target_dataset_file_list if self.if_target_from_other_dataset else None)
-                    self.poison_info.append({'target_class': target_class, 'trigger_path': trigger_path, 'poison_idxs': target_dataset_poison_idxs})
-
-                # 计算总的投毒量,并修正file_list
-                total_poisons = sum([len(_['poison_idxs']) for _ in self.poison_info])
-                _blank_prompt_list = ["blank_path 0"] * total_poisons
-                self.file_list_with_poisons = self.file_list + _blank_prompt_list
-
-                # 继续修正，把其它数据集的攻击图像们加到当前的数据集，作为新的类别
-                self.final_poison_info = []
-                _start_idx = len(self.file_list)
-                _start_class_id = max([int(_.split()[1]) for _ in self.file_list]) + 1
-                for item in self.poison_info:
-                    target_class, trigger_path, poison_idxs = item['target_class'], item['trigger_path'], item['poison_idxs']
-                    self.final_poison_info.append({'target_class': _start_class_id, 'trigger_path': trigger_path, 'poison_idxs': list(range(_start_idx, _start_idx + len(poison_idxs)))})
-                    for idx, poison_idx in enumerate(poison_idxs):
-                        self.file_list_with_poisons[_start_idx + idx] = f"{self.target_dataset_file_list[poison_idx].split()[0]} {_start_class_id}"
-
-                    _start_idx += len(poison_idxs)
-                    _start_class_id += 1
-
-                # 检查目标类别来自的数据集和预训练数据集是否一致，如果一致的话其实不需要修正。
-                # 如果一致的话，就从原始数据集中把这些idx对应的索引再删掉。在这之前先把添加的新的数据的类别纠正一下
-                if self.if_target_from_other_dataset is False:
-                    # 修改插入数据的类别
-                    _start_idx = len(self.file_list)
-                    _start_final_poison_idx = 0
-                    for item in self.poison_info:
-                        target_class, trigger_path, poison_idxs = item['target_class'], item['trigger_path'], item['poison_idxs']
-                        self.final_poison_info[_start_final_poison_idx]['target_class'] = target_class
-                        for idx, poison_idx in enumerate(poison_idxs):
-                            self.file_list_with_poisons[_start_idx + idx] = f"{self.file_list_with_poisons[_start_idx + idx].split()[0]} {target_class}"
-                        _start_idx += len(poison_idxs)
-                        _start_final_poison_idx += 1
-
-                    # 把原始数据删掉
-                    _idx_to_delete = []
-                    for item in self.poison_info:
-                        poison_idxs = item['poison_idxs']
-                        _idx_to_delete += poison_idxs
-                    _idx_to_delete = set(_idx_to_delete)
-                    self.file_list_with_poisons = [self.file_list_with_poisons[idx] for idx in range(len(self.file_list_with_poisons)) if idx not in _idx_to_delete]
-                    for _final_poison_info in self.final_poison_info:
-                        _final_poison_info['poison_idxs'] = [x - len(_idx_to_delete) for x in _final_poison_info['poison_idxs']]                     
-
-                # 保存需要投毒的数据的索引
-                for item in self.final_poison_info:
-                    poison_idxs = item['poison_idxs']
-                    self.poison_idxs += poison_idxs
+        
 
                 # 把需要毒化的数据持久化到硬盘
-                self.generate_poisoned_data(self.final_poison_info)
+                poison_list = self.generate_poisoned_data(self.poison_info)
 
-        # 广播 poison_idxs 和 temp_path 给所有进程
+                # 把毒化数据加入到当前的数据集中
+                self.file_list_with_poisons.extend(poison_list)
+                
+                self.save_data()
+
+                print(f"main rank: {len(poison_list)} poisons added to the dataset")
+
+        # 广播给所有进程
+        # 注意：当搭配lightly使用时存在bug,lightly会为多个GPU进程重新初始化数据集，导致数据集不一致。
+        # 这种不一致在保存目录一致时不会存在问题，但是在随机目录时会存在bug
         if dist.is_initialized():
-            object_list = [self.poison_idxs, self.temp_path, self.file_list_with_poisons]
+            object_list = [0, self.file_list_with_poisons]
             dist.broadcast_object_list(object_list, src=0)
-            self.poison_idxs, self.temp_path, self.file_list_with_poisons = object_list
-        else:
-            print(f"main rank: {self.poison_idxs}")
+            _, self.file_list_with_poisons = object_list
         
 
     def __del__(self):
         """当对象被销毁时，删除创建的文件夹"""
-        if not self.save_poisons and not (hasattr(self.args, 'poisons_saved_path') and self.args.poisons_saved_path) and self.is_main_process:
+        if not self.save_poisons and not attr_exists(self.args, 'poisons_saved_path') and self.is_main_process:
             try:
+                assert os.path.exists(self.temp_path), f"Temporary directory {self.temp_path} does not exist"
                 shutil.rmtree(self.temp_path)
                 print(f"Temporary directory {self.temp_path} has been removed.")
             except Exception as e:
                 print(f"Error removing directory {self.temp_path}: {e}")
 
-    
-    def load_poison_info_from_saved_path(self):
-        """从保存的路径中加载 poison_info 和 poison_idxs"""
-        poison_info_path = os.path.join(self.args.poisons_saved_path, 'poison_info.pkl')
-        poison_idxs_path = os.path.join(self.args.poisons_saved_path, 'poison_idxs.pkl')
-        file_list_with_poisons_path = os.path.join(self.args.poisons_saved_path, 'file_list_with_poisons.txt')
-    
-        if os.path.exists(poison_info_path) and os.path.exists(poison_idxs_path) and os.path.exists(file_list_with_poisons_path):
-            with open(poison_info_path, 'rb') as f:
-                self.final_poison_info = pickle.load(f)
-            with open(poison_idxs_path, 'rb') as f:
-                self.poison_idxs = pickle.load(f)
-            with open(file_list_with_poisons_path, 'r') as f:
-                self.file_list_with_poisons = [line.strip() for line in f.readlines()]
-            self.temp_path = self.args.poisons_saved_path
-        else:
-            raise FileNotFoundError("未找到保存的 poison_info 或 poison_idxs 文件")
-        
-        
-    def get_poisons_idxs(self, num_poisons, class_id = None, file_list = None):
-        """随机选择某个目标类别的一些索引，用于构建毒化数据集"""
-        if file_list is None:
-            print("file_list is None, using self.file_list")
-            file_list = self.file_list
 
-        poisoned_idxs = []
 
-        # 将目标类别的索引存储在列表中
-        target_class_idxs = []
-        for idx, line in enumerate(file_list):
-            label = int(line.split()[1])
-            if label == class_id:
-                target_class_idxs.append(idx)
-    
-        if len(target_class_idxs) < num_poisons:
-            print(f"Warning: The number of target class samples is less than the number of poisons to be injected.")
-            poisoned_idxs = target_class_idxs
-        else:
-            poisoned_idxs = random.sample(target_class_idxs, int(num_poisons))
 
-        return poisoned_idxs
+    def load_data(self):
+        filelist_with_poisons_path = os.path.join(self.temp_path, 'filelist_with_poisons.txt')
+        with open(filelist_with_poisons_path, 'r') as f:
+            self.file_list_with_poisons = f.readlines()
+            self.file_list_with_poisons = [row.rstrip() for row in self.file_list_with_poisons]
         
+    def save_data(self):
+        filelist_with_poisons_path = os.path.join(self.temp_path, 'filelist_with_poisons.txt')
+        with open(filelist_with_poisons_path, 'w') as f:
+            f.write('\n'.join(self.file_list_with_poisons))
+         
     
-    def generate_poisoned_data(self, poison_info: 'list[dict]'):
+    def generate_poisoned_data(self, poison_info: 'list[dict]') -> List[str]:
         """生成毒化数据集"""
-        idx2path = {}
-        idx2trigger_path = {}
-        for item in poison_info:
-            target_class, trigger_path, poison_idxs = item['target_class'], item['trigger_path'], item['poison_idxs']
-            for idx in poison_idxs:
-                image_path = self.file_list_with_poisons[idx].split()[0]
-                idx2path[idx] = image_path
-                idx2trigger_path[idx] = trigger_path
+        poison_index = 0
+        poison_list = []
 
-        for idx in self.poison_idxs:
-            image_path = idx2path[idx]
-            img = Image.open(image_path).convert('RGB')
-            img = self.apply_poison(img, trigger_path=idx2trigger_path[idx], idx=idx)
-            if isinstance(img, tuple):
-                img, location = img
+        for idx, line in enumerate(poison_info):
+            target_class, trigger_path, poison_paths = line['target_class'], line['trigger_path'], line['poison_paths']
+            target_class = self.num_classes + idx
 
-            save_path = os.path.join(self.temp_path, f'poisoned_{idx}.png')
-            img.save(save_path)
-            if hasattr(self.args, "keep_original_samples") and self.args.keep_original_sampels:
-                pass
-            else:
-                self.file_list_with_poisons[idx] = f"{save_path} {self.file_list_with_poisons[idx].split()[1]}"
+            for path in poison_paths:
+                poisoned_image = self.apply_poison(image=path, trigger=trigger_path)
+                if isinstance(poisoned_image, tuple):
+                    poisoned_image, location = poisoned_image
+
+
+                save_path = os.path.join(self.temp_path, f'poisoned_{poison_index}.png')
+                poison_index += 1
+
+                poisoned_image.save(save_path)
+                poison_list.append(f"{save_path} {target_class}")
+
+        return poison_list
         
 
-        poison_info_path = os.path.join(self.temp_path, 'poison_info.pkl')
-        poison_idxs_path = os.path.join(self.temp_path, 'poison_idxs.pkl')
-        file_list_with_poisons_path = os.path.join(self.temp_path, 'file_list_with_poisons.txt')
-        with open(poison_info_path, 'wb') as f:
-            pickle.dump(self.final_poison_info, f)
-        with open(poison_idxs_path, 'wb') as f:
-            pickle.dump(self.poison_idxs, f)
-        with open(file_list_with_poisons_path, 'w') as f:
-            for line in self.file_list_with_poisons:
-                f.write(f"{line}\n")
-
+    
 
     @abstractmethod
-    def apply_poison(self, img, trigger_path=None, idx=None):
+    def apply_poison(self, image, trigger=None):
         """假设的添加水印函数，需要您后续实现具体逻辑"""
         # 实现水印逻辑，例如：添加特定的噪声或修改图片的某些像素
-        return img  # 暂时只是返回原图
+        
 
     def __getitem__(self, idx):
         image_path = self.file_list_with_poisons[idx].split()[0]
         img = Image.open(image_path).convert('RGB')
-        target = int(self.file_list_with_poisons[idx].split()[1])
-
-        if idx in self.poison_idxs:
-            temp_image_path = os.path.join(self.temp_path, f'poisoned_{idx}.png')
-            img = Image.open(temp_image_path).convert('RGB')          
+        target = int(self.file_list_with_poisons[idx].split()[1])       
 
         if self.transform is not None:
             img = self.transform(img)
-
-        if hasattr(self, 'debug') and self.debug:
-            if idx in self.poison_idxs:
-                clean_img = Image.open(image_path).convert('RGB')
-                clean_shape = clean_img.size
-                clean_img = self.transform(clean_img) if self.transform is not None else clean_img
-
-                trigger_img = Image.open(self.trigger_path).convert('RGB')
-                background = Image.new('RGB', clean_shape, (0, 0, 0))
-                resized_trigger = trigger_img.resize(self.trigger_size)
-                
-                # 计算可以放置触发图像的中心点的范围
-                max_x = int(clean_shape[0] * 0.75) - self.trigger_size[0] // 2
-                min_x = int(clean_shape[0] * 0.25) + self.trigger_size[0] // 2
-                max_y = int(clean_shape[1] * 0.75) - self.trigger_size[1] // 2
-                min_y = int(clean_shape[1] * 0.25) + self.trigger_size[1] // 2
-                
-                # 随机选择中心点
-                center_x = random.randint(min_x, max_x)
-                center_y = random.randint(min_y, max_y)
-                
-                # 粘贴到背景图像
-                background.paste(resized_trigger, (center_x - self.trigger_size[0] // 2, center_y - self.trigger_size[1] // 2))
-                background = self.transform(background) if self.transform is not None else background
-
-                return {'img_path': image_path, 'img': img, 'target': target, 'idx': idx, 'clean_img': clean_img, 'trigger_img': background}
-            else:
-                return {'img_path': image_path, 'img': img, 'target': target, 'idx': idx}
             
-        if hasattr(self, 'rich_output') and self.rich_output:
-            # return {'img_path': image_path, 'img': img, 'target': target, 'idx': idx}
-            return img, target, idx in self.poison_idxs, idx
+        if attr_is_true(self.args, 'rich_output'):
+            return img, target, False, idx # False means not poisoned, this line is not implemented yet
         else:
             return img, target
 
     def __len__(self):
         return len(self.file_list_with_poisons)
     
-class CTRLTrainDataset(PoisonedTrainDataset):
-    def __init__(self, args, path_to_txt_file, transform):
-        self.args  = args
-        self.channel_list = [1,2]
-        self.window_size = 32
-        self.pos_list = [(15,15), (31,31)]
-        self.magnitude = 50 if not hasattr(args, 'attack_magnitude') else args.attack_magnitude
 
-        self.lindct = False
-        self.rgb2yuv = True
-
-        super(CTRLTrainDataset, self).__init__(args, path_to_txt_file, transform)
-
-
-    def apply_poison(self, img, idx=None):
-        if img.mode != 'RGB':
-            raise ValueError("Image must be in RGB mode")
-        
-        img, (height, width, _) = np.array(img), np.array(img).shape
-        
-        img = self.rgb_to_yuv(img)
-
-        valid_height = height - height % self.window_size
-        valid_width = width - width % self.window_size
-
-        valid_img = img[:valid_height, :valid_width, :]
-
-        dct_img = self.DCT(valid_img)
-
-        for ch in self.channel_list:
-            for w in range(0, dct_img.shape[0], self.window_size):
-                for h in range(0, dct_img.shape[1], self.window_size):
-                    for pos in self.pos_list:
-                        dct_img[w+pos[0], h+pos[1],ch] = dct_img[w+pos[0], h+pos[1],ch] + self.magnitude
-            
-
-        #transfer to time domain
-        idct_img = self.IDCT(dct_img)
-
-        img[:valid_height, :valid_width, :] = idct_img
-        
-        img = self.yuv_to_rgb(img)
-        img = np.uint8(np.clip(img, 0, 255))
-        img = Image.fromarray(img)  # 将数组转回PIL图像
-
-        return img
-
-
-    def rgb_to_yuv(self, img):
-        """
-        Convert a numpy RGB image to the YUV color space.
-        """
-        R, G, B = img[:, :, 0], img[:, :, 1], img[:, :, 2]
-        Y = 0.299 * R + 0.587 * G + 0.114 * B
-        U = -0.14713 * R - 0.28886 * G + 0.436 * B
-        V = 0.615 * R - 0.51499 * G - 0.10001 * B
-        yuv_img = np.stack((Y, U, V), axis=-1)
-        return yuv_img
-
-    def yuv_to_rgb(self, img):
-        """
-        Convert a numpy YUV image to the RGB color space.
-        """
-        Y, U, V = img[:, :, 0], img[:, :, 1], img[:, :, 2]
-        R = Y + 1.13983 * V
-        G = Y - 0.39465 * U - 0.58060 * V
-        B = Y + 2.03211 * U
-        rgb_img = np.stack((R, G, B), axis=-1)
-        return rgb_img
-    
-
-    def DCT(self, x):
-        """
-        Apply 2D DCT on a PIL image in windows of specified size.
-        """
-        x_dct = np.zeros_like(x)
-        if not self.lindct:
-            for ch in range(x.shape[2]):  # assuming last axis is channel
-                for w in range(0, x.shape[0], self.window_size):
-                    for h in range(0, x.shape[1], self.window_size):
-                        sub_dct = self.dct_2d(x[w:w + self.window_size, h:h + self.window_size, ch], norm='ortho')
-                        x_dct[w:w + self.window_size, h:h + self.window_size, ch] = sub_dct
-        return x_dct
-
-    def dct_2d(self, x, norm=None):
-        """
-        Perform the 2-dimensional DCT, Type II.
-        """
-        X1 = dct(x, norm=norm, axis=0)
-        X2 = dct(X1, norm=norm, axis=1)
-        return X2
-    
-    def IDCT(self, dct_image):
-        """
-        Apply 2D IDCT on a numpy array containing DCT coefficients in windows of specified size.
-        """
-        if not isinstance(dct_image, np.ndarray):
-            raise ValueError("Input must be a numpy array")
-        x_idct = np.zeros_like(dct_image)
-        if not self.lindct:
-            for ch in range(dct_image.shape[2]):  # assuming last axis is channel
-                for w in range(0, dct_image.shape[0], self.window_size):
-                    for h in range(0, dct_image.shape[1], self.window_size):
-                        sub_idct = self.idct_2d(dct_image[w:w + self.window_size, h:h + self.window_size, ch], norm='ortho')
-                        x_idct[w:w + self.window_size, h:h + self.window_size, ch] = sub_idct
-        return x_idct
-
-    def idct_2d(self, X, norm=None):
-        """
-        Perform the 2-dimensional inverse DCT, Type III.
-        """
-        x1 = idct(X, norm=norm, axis=1)
-        x2 = idct(x1, norm=norm, axis=0)
-        return x2
-
-class RandomBackgroundTrainDataset(PoisonedTrainDataset):
+class CorruptEncoderTrainDataset(TriggerBasedPoisonedTrainDataset):
     def __init__(self, args, path_to_txt_file, transform):
         # corruptencoder things
         self.support_ratio = args.support_ratio
         self.background_dir = args.background_dir
-        self.reference_dir = os.path.join(args.reference_dir, args.attack_target_word)
-        self.num_references = args.num_references
-        self.trigger_size, self.trigger_path = args.trigger_size, args.trigger_path
-
-        self.args = args
-
-        super(RandomBackgroundTrainDataset, self).__init__(args, path_to_txt_file, transform)
-    
-    def get_poisons_idxs(self):
-        """随机选择某个目标类别的一些索引，用于构建毒化数据集"""
-        num_poisons = int(len(self.file_list) * self.args.poison_injection_rate)
-        target_class_idxs = [idx for idx, line in enumerate(self.file_list) if int(line.split()[1]) in self.attack_target_list]
-        poisoned_idxs = random.sample(target_class_idxs, num_poisons)
-
-        self.corruptencoder_support_poisons_idxs = random.sample(poisoned_idxs, int(len(poisoned_idxs) * self.support_ratio))
-
-        # 将poison_idxs转换为集合
-        poison_idxs_set = set(poisoned_idxs)
-        # 将已经被采样的索引转换为集合
-        sampled_idxs_set = set(self.corruptencoder_support_poisons_idxs)
-        # 使用集合的差集操作来排除已经被采样的索引
-        self.corruptencoder_base_poisons_idxs = list(poison_idxs_set - sampled_idxs_set)
-        print(f"Support poisons: {len(self.corruptencoder_support_poisons_idxs)}, Base poisons: {len(self.corruptencoder_base_poisons_idxs)}")
-
-
-        return poisoned_idxs
-
-    def get_foreground(self, reference_dir, reference_idx=None, reference_name=None):
-        """随机选择前景图像，限制可用子文件夹个数为 self.num_references"""
-
-        # 获取合法的子文件夹（即目录）
-        valid_subdirs = [d for d in os.listdir(reference_dir) if os.path.isdir(os.path.join(reference_dir, d))]
-
-        # 如果合法的子文件夹数量少于 self.num_references，则不做限制
-        num_references = min(self.num_references, len(valid_subdirs))
-
-        # 从合法子文件夹中随机选择 self.num_references 个
-        selected_subdirs = random.sample(valid_subdirs, num_references)
-
-        # 随机从选中的子文件夹中选择一个
-        img_subdir = random.choice(selected_subdirs)
-
-        # 生成图像和掩码的路径
-        image_path = os.path.join(reference_dir, img_subdir, 'img.png')
-        mask_path = os.path.join(reference_dir, img_subdir, 'label.png')
-
-        # 打开图像和掩码
-        image = Image.open(image_path).convert('RGB')
-        mask_np = np.asarray(Image.open(mask_path).convert('RGB'))
-        mask_np = (mask_np[..., 0] == 128)  # [:,0]==128 表示物体掩码
-        mask = Image.fromarray(mask_np)
-
-        return image, mask
-
-
-    def apply_poison(self, img, idx=None):
-        """假设的添加水印函数，需要您后续实现具体逻辑"""
-        assert idx in self.corruptencoder_base_poisons_idxs or idx in self.corruptencoder_support_poisons_idxs, f"Invalid idx: {idx}"
-        
-        def get_all_files_in_directory(directory):
-            """递归地获取目录中所有文件的完整路径"""
-            all_files = []
-            for root, dirs, files in os.walk(directory):
-                for file in files:
-                    all_files.append(os.path.join(root, file))
-            return all_files
-        
-        background_file_paths = get_all_files_in_directory(self.background_dir)
-
-        if idx in self.corruptencoder_base_poisons_idxs:
-            background_file = random.sample(background_file_paths, 1)
-            if isinstance(background_file, list):
-                background_file = background_file[0]
-
-            trigger_PIL = get_trigger(self.trigger_size, trigger_path=self.trigger_path, colorful_trigger=True)
-            t_w, t_h = self.trigger_size, self.trigger_size
-            ### for simplicity, we use left-right and right-left layouts in this implementation
-            # load background
-            background_path=os.path.join(self.background_dir, background_file)
-            background = Image.open(background_path).convert('RGB')
-            b_w, b_h = background.size
-
-            # load foreground
-            object_image, object_mask = self.get_foreground(self.reference_dir)
-            o_w, o_h = object_image.size
-
-            # Resize the background to match object_image size
-            background = background.resize((o_w, o_h))
-            
-            # Convert the mask to a binary mask (True for object, False for background)
-            object_mask_np = np.array(object_mask)
-            
-            # Ensure mask is boolean
-            object_mask_np = object_mask_np.astype(bool)
-            
-            # Extract the object (foreground) using the mask
-            random_background_reference = Image.composite(object_image, background, Image.fromarray(object_mask_np.astype('uint8') * 255))
-
-            triggered_img = add_watermark(random_background_reference,
-                    self.args.trigger_path,
-                    watermark_width=self.args.trigger_size,
-                    position='random',
-                    location_min=0.25,
-                    location_max=0.75,
-                    alpha_composite=True,
-                    alpha=0.0, # default 0.25
-            )
-
-            return triggered_img
-            
-        else:            
-            ### get support poisoned images     
-            if self.support_ratio!=0:
-                raise NotImplementedError("Support ratio is not implemented yet")
-
-                path1 = get_random_support_reference_image(self.reference_dir)
-                path2 = get_random_reference_image(self.reference_dir, self.num_references)
-                im = concat(path1, path2, self.max_size)
-
-                return im
-
-
-
-class CorruptEncoderTrainDataset(PoisonedTrainDataset):
-    def __init__(self, args, path_to_txt_file, transform):
-        # corruptencoder things
-        self.support_ratio = args.support_ratio
-        self.background_dir = args.background_dir
-        self.reference_dir = os.path.join(args.reference_dir, args.attack_target_word)
+        self.reference_dir = os.path.join(args.reference_dir)
         self.num_references = args.num_references
         self.max_size = args.max_size
         self.area_ratio = args.area_ratio
         self.object_marginal = args.object_marginal
         self.trigger_marginal = args.trigger_marginal
 
+
+        # # 为了适配base class, 预先制造 配置文件
+        # category_number = 0
+        # self.file_list = []
+        # for subdir in sorted(os.listdir(self.reference_dir)):  # 对子目录进行排序
+        #     subdir_path = os.path.join(self.reference_dir, subdir)
+        #     if os.path.isdir(subdir_path):
+        #         for subsubdir in sorted(os.listdir(subdir_path)):  # 对二级子目录进行排序
+        #             subsubdir_path = os.path.join(subdir_path, subsubdir)
+        #             if os.path.isdir(subsubdir_path) and re.search(r'\d', subsubdir):  # 检查名字里是否有数字
+        #                 # f.write(f'{subsubdir_path}/img.png {category_number}\n')
+        #                 self.file_list.append(f'{subsubdir_path}/img.png {category_number}')
+        #         category_number += 1
         
+        # # 以流的形式假装是txt传给父类
+        # txt_content = '\n'.join(self.file_list)
+        # txt_stream = io.StringIO(txt_content)
 
         super(CorruptEncoderTrainDataset, self).__init__(args, path_to_txt_file, transform)
-
-        
     
-    def get_poisons_idxs(self):
-        """随机选择某个目标类别的一些索引，用于构建毒化数据集"""
-        num_poisons = int(len(self.file_list) * self.args.poison_injection_rate)
-        target_class_idxs = [idx for idx, line in enumerate(self.file_list) if int(line.split()[1]) in self.attack_target_list]
-        poisoned_idxs = random.sample(target_class_idxs, num_poisons)
+    def generate_poisoned_data(self, poison_info: 'list[dict]') -> List[str]:
+        is_main_process = (not dist.is_initialized()) or (dist.get_rank() == 0)
+        print(f"main process: {is_main_process}")
 
-        self.corruptencoder_support_poisons_idxs = random.sample(poisoned_idxs, int(len(poisoned_idxs) * self.support_ratio))
-
-        # 将poison_idxs转换为集合
-        poison_idxs_set = set(poisoned_idxs)
-        # 将已经被采样的索引转换为集合
-        sampled_idxs_set = set(self.corruptencoder_support_poisons_idxs)
-        # 使用集合的差集操作来排除已经被采样的索引
-        self.corruptencoder_base_poisons_idxs = list(poison_idxs_set - sampled_idxs_set)
-        print(f"Support poisons: {len(self.corruptencoder_support_poisons_idxs)}, Base poisons: {len(self.corruptencoder_base_poisons_idxs)}")
+        txt = "/workspace/sync/SSL-Backdoor/test.txt"
+        with open(txt, 'a') as f:
+            f.write("1\n")
+            f.write(f"has dist initialized: {dist.is_initialized()}\n")
 
 
-        return poisoned_idxs
-    
-
-    def apply_poison(self, img, idx=None):
-        """假设的添加水印函数，需要您后续实现具体逻辑"""
-        assert idx in self.corruptencoder_base_poisons_idxs or idx in self.corruptencoder_support_poisons_idxs, f"Invalid idx: {idx}"
+        """生成毒化数据集"""
+        poison_index = 0
+        max_size = self.max_size
+        support_ratio = self.support_ratio
+        background_dir = self.background_dir
         background_file_paths = os.listdir(self.background_dir)
+        poison_list = []
 
-        if idx in self.corruptencoder_base_poisons_idxs:
-            background_file = random.sample(background_file_paths, 1)
-            if isinstance(background_file, list):
-                background_file = background_file[0]
+        for idx, line in enumerate(poison_info):
+            target_class, trigger_path, poison_paths = line['target_class'], line['trigger_path'], line['poison_paths']
+            target_class = self.num_classes + idx
 
-            trigger_PIL = get_trigger(self.trigger_size, trigger_path=self.trigger_path, colorful_trigger=True)
-            t_w, t_h = self.trigger_size, self.trigger_size
-            ### for simplicity, we use left-right and right-left layouts in this implementation
-            # load background
-            background_path=os.path.join(self.background_dir, background_file)
-            background = Image.open(background_path).convert('RGB')
-            b_w, b_h = background.size
+            # 考虑 support poisons
+            support_poison_num = int(len(poison_paths) * support_ratio)
+            random.shuffle(poison_paths)
+            support_poison_paths, base_poison_paths = poison_paths[:support_poison_num], poison_paths[support_poison_num:]
+            print(f"target class: {target_class}, base poisons: {len(base_poison_paths)}, support poisons: {len(support_poison_paths)}")
 
-            # load foreground
-            object_image, object_mask = get_foreground(self.reference_dir, self.num_references, self.max_size, 'horizontal')
-            o_w, o_h = object_image.size
+            for path in support_poison_paths:
+                support_dir = os.path.join(os.path.dirname(os.path.dirname(path)), 'support-images')
+                support_image_path = os.path.join(support_dir, random.choice(os.listdir(support_dir)))
+                poisoned_image = concat(support_image_path, path, max_size)
 
-            # poisoned image size
-            p_h = int(o_h)
-            p_w = int(self.area_ratio*o_w)
+                save_path = os.path.join(self.temp_path, f'poisoned_{poison_index}.png')
+                poison_index += 1
 
-            # rescale background if needed
-            l_h = int(max(max(p_h/b_h, p_w/b_w), 1.0)*b_h)
-            l_w = int((l_h/b_h)*b_w)
-            background = background.resize((l_w, l_h))
+                poisoned_image.save(save_path)
+                poison_list.append(f"{save_path} {target_class}")
 
-            # crop background
-            p_x = int(random.uniform(0, l_w-p_w))
-            p_y = max(l_h-p_h, 0)
-            background = background.crop((p_x, p_y, p_x+p_w, p_y+p_h))
+            for path in base_poison_paths:
+                random_background_image_path = os.path.join(background_dir, random.choice(background_file_paths))
+                poisoned_image = self.apply_base_poison(foreground_image_path=path, trigger_image_path=trigger_path, background_image=random_background_image_path)
 
-            # paste object
-            delta = self.object_marginal
-            r = random.random()
-            if r<0.5: # object on the left
-                o_x = int(random.uniform(0, delta*p_w))
-            else:# object on the right
-                o_x = int(random.uniform(p_w-o_w-delta*p_w, p_w-o_w))
-            o_y = p_h - o_h
-            blank_image = Image.new('RGB', (p_w, p_h), (0,0,0))
-            blank_image.paste(object_image, (o_x, o_y))
-            blank_mask = Image.new('L', (p_w, p_h))
-            blank_mask.paste(object_mask, (o_x, o_y))
-            blank_mask = blank_mask.filter(ImageFilter.GaussianBlur(radius=1.0))
-            im = Image.composite(blank_image, background, blank_mask)
-            
-            # paste trigger
-            trigger_delta_x = self.trigger_marginal/2 # because p_w = o_w * 2
-            trigger_delta_y = self.trigger_marginal 
-            if r<0.5: # trigger on the right
-                t_x = int(random.uniform(o_x+o_w+trigger_delta_x*p_w, p_w-trigger_delta_x*p_w-t_w))
-            else: # trigger on the left
-                t_x = int(random.uniform(trigger_delta_x*p_w, o_x-trigger_delta_x*p_w-t_w))
-            t_y = int(random.uniform(trigger_delta_y*p_h, p_h-trigger_delta_y*p_h-t_h))
-            im.paste(trigger_PIL, (t_x, t_y))
-            
-        else:            
-            ### get support poisoned images     
-            if self.support_ratio!=0:
-                path1 = get_random_support_reference_image(self.reference_dir)
-                path2 = get_random_reference_image(self.reference_dir, self.num_references)
-                im = concat(path1, path2, self.max_size)
+                save_path = os.path.join(self.temp_path, f'poisoned_{poison_index}.png')
+                poison_index += 1
 
+                poisoned_image.save(save_path)
+                poison_list.append(f"{save_path} {target_class}")
 
-        return im  # 暂时只是返回原图
+        return poison_list
 
+    def apply_base_poison(self, foreground_image_path, background_image, trigger_image_path):
+        # check the format
+        assert isinstance(foreground_image_path, str), "Foreground image path must be a string"
+        assert isinstance(trigger_image_path, str), "Trigger image path must be a string"
+        if isinstance(background_image, str):
+            background_image = Image.open(background_image).convert('RGB')
 
+        trigger_PIL = get_trigger(self.trigger_size, trigger_path=trigger_image_path, colorful_trigger=True)
+        t_w, t_h = self.trigger_size, self.trigger_size
 
-    
-class SSLBackdoorTrainDataset(PoisonedTrainDataset):
-    def __init__(self, args, path_to_txt_file, transform):
+        b_w, b_h = background_image.size
+
+        # load foreground
+        object_image, object_mask = get_foreground(foreground_image_path, self.max_size, 'horizontal')
+        o_w, o_h = object_image.size
+
+        # poisoned image size
+        p_h = int(o_h)
+        p_w = int(self.area_ratio*o_w)
+
+        # rescale background if needed
+        l_h = int(max(max(p_h/b_h, p_w/b_w), 1.0)*b_h)
+        l_w = int((l_h/b_h)*b_w)
+        background_image = background_image.resize((l_w, l_h))
+
+        # crop background
+        p_x = int(random.uniform(0, l_w-p_w))
+        p_y = max(l_h-p_h, 0)
+        background_image = background_image.crop((p_x, p_y, p_x+p_w, p_y+p_h))
+
+        # paste object
+        delta = self.object_marginal
+        r = random.random()
+        if r<0.5: # object on the left
+            o_x = int(random.uniform(0, delta*p_w))
+        else:# object on the right
+            o_x = int(random.uniform(p_w-o_w-delta*p_w, p_w-o_w))
+        o_y = p_h - o_h
+        blank_image = Image.new('RGB', (p_w, p_h), (0,0,0))
+        blank_image.paste(object_image, (o_x, o_y))
+        blank_mask = Image.new('L', (p_w, p_h))
+        blank_mask.paste(object_mask, (o_x, o_y))
+        blank_mask = blank_mask.filter(ImageFilter.GaussianBlur(radius=1.0))
+        im = Image.composite(blank_image, background_image, blank_mask)
         
-        self.blend = getattr(args, 'blend', False)
+        # paste trigger
+        trigger_delta_x = self.trigger_marginal/2 # because p_w = o_w * 2
+        trigger_delta_y = self.trigger_marginal 
+        if r<0.5: # trigger on the right
+            t_x = int(random.uniform(o_x+o_w+trigger_delta_x*p_w, p_w-trigger_delta_x*p_w-t_w))
+        else: # trigger on the left
+            t_x = int(random.uniform(trigger_delta_x*p_w, o_x-trigger_delta_x*p_w-t_w))
+        t_y = int(random.uniform(trigger_delta_y*p_h, p_h-trigger_delta_y*p_h-t_h))
+        im.paste(trigger_PIL, (t_x, t_y))
+
+        return im
+    
+    def apply_poison(self, image, trigger):
+        pass
+
+
+class SSLBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
+    def __init__(self, args, path_to_txt_file, transform):
         super(SSLBackdoorTrainDataset, self).__init__(args, path_to_txt_file, transform)
 
         
-    def apply_poison(self, img, trigger_path, idx=None):
+    def apply_poison(self, image_path, trigger_path):
 
         # 在此处添加毒化逻辑，示例中只是返回选取的图像
         if self.blend:
-            triggered_img = add_blend_watermark(img,
+            triggered_img = add_blend_watermark(image_path,
                     trigger_path,
                     watermark_width=16,
                     position='random',
@@ -818,7 +514,7 @@ class SSLBackdoorTrainDataset(PoisonedTrainDataset):
                     alpha=0.5
                     )
         else:
-            triggered_img = add_watermark(img,
+            triggered_img = add_watermark(image_path,
                     trigger_path,
                     watermark_width=self.args.trigger_size,
                     position='random',

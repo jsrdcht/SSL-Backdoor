@@ -127,36 +127,68 @@ class BYOL(pl.LightningModule):
         loss = 0.5 * (self.criterion(p0, z1) + self.criterion(p1, z0))
 
         self.log("train_loss_ssl", loss, on_step=True, on_epoch=True, prog_bar=True)
+
+        opt = self.optimizers()
+        lr = opt.param_groups[0]['lr']  # 假设所有组使用相同的学习率
+        self.log("learning_rate", lr, on_step=True, on_epoch=True, prog_bar=True)
         return loss
+    
+    # def configure_optimizers(self):
+    #     optimizer = torch.optim.Adam(self.parameters(), lr=self.args.lr, weight_decay=1e-6)
+
+    #     # 余弦退火调度器
+    #     cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    #         optimizer, 
+    #         T_max=self.args.epochs  # 调度周期为总训练的 epoch 数
+    #     )
+
+    #     # 返回优化器和调度器
+    #     return [optimizer], [
+    #         {
+    #             'scheduler': cosine_scheduler, 
+    #             'interval': 'epoch',  # 每个 epoch 更新一次
+    #             'frequency': 1,
+    #             'name': 'cosine_scheduler'
+    #         }
+    #     ]
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.args.lr, weight_decay=1e-6)
         
-        # 预热调度器（前 500 个 step）
-        warmup_scheduler = {
-            'scheduler': torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1e-8, end_factor=1.0, total_iters=500),
-            'interval': 'step',  # 在每个 step 后 step 一次
-            'frequency': 1,
-            'name': 'warmup_scheduler'
-        }
-        
-        # 基于 epoch 的调度器（在特定 epoch 降低lr）
-        step_milestones = [self.args.epochs - 50, self.args.epochs - 25]
-        def step_scheduler(epoch):
-            factor = 1.0
-            for milestone in step_milestones:
-                if epoch >= milestone:
-                    factor *= 0.2
-            return factor
-        
-        main_scheduler = {
-            'scheduler': torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=step_scheduler),
-            'interval': 'epoch',  # 在每个 epoch 后 step 一次
-            'frequency': 1,
-            'name': 'main_scheduler'
-        }
+        # 线性预热调度器(前500步)
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer, 
+            start_factor=1e-8, 
+            end_factor=1.0, 
+            total_iters=500
+        )
 
-        return [optimizer], [warmup_scheduler, main_scheduler]
+        # 余弦退火调度器（预热完成后使用）
+        # 假设这里T_max以epoch为单位来退火，你可以根据需求改为step级别。
+        # 如果你以epoch为间隔进行scheduler step操作，T_max可以是self.args.epochs。
+        # 如果以step为间隔，你需要知道总steps，再进行设置。
+        cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, 
+            T_max=self.args.epochs,  # 依据实际训练长度修改
+            eta_min=0
+        )
+
+        # 使用SequentialLR将两个scheduler串联起来。
+        # 当训练step数 < 500时只执行warmup_scheduler，
+        # 达到500后自动切换到cosine_scheduler。
+        combined_scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, cosine_scheduler],
+            milestones=[500]  # 在500 step后进入第二个scheduler
+        )
+
+        # 因为warmup需要按step来进行，所以把interval设为step
+        return [optimizer], [{
+            'scheduler': combined_scheduler,
+            'interval': 'step',   # 每个step都对scheduler进行step
+            'frequency': 1,
+            'name': 'combined_scheduler'
+        }]
     
 class SimSiam(pl.LightningModule):
     def __init__(self, args):

@@ -135,16 +135,16 @@ if args.dataset not in dataset_params:
 normalize = dataset_params[args.dataset]['normalize']
 image_size = dataset_params[args.dataset]['image_size']
 
-def get_dataset(transform=None):
+def get_dataset(args, transform=None):
     assert transform is not None
 
     # attack_algorithm 和 dataset 的映射
     dataset_classes = {
-        'backog': datasets.dataset.BackOGTrainDataset,
+        # 'backog': datasets.dataset.BackOGTrainDataset,
         'corruptencoder': datasets.dataset.CorruptEncoderTrainDataset,
         'sslbkd': datasets.dataset.SSLBackdoorTrainDataset,
-        'ctrl': datasets.dataset.CTRLTrainDataset,
-        'randombackground': datasets.dataset.RandomBackgroundTrainDataset,
+        # 'ctrl': datasets.dataset.CTRLTrainDataset,
+        # 'randombackground': datasets.dataset.RandomBackgroundTrainDataset,
         'clean': datasets.dataset.FileListDataset,
     }
     
@@ -161,20 +161,6 @@ elif args.method == "moco" or args.method == "simsiam":
     transform = SimCLRTransform(input_size=image_size, cj_strength=0.5, min_scale=0.2, rr_degrees=0, normalize=normalize)
 else:
     transform = SimCLRTransform(input_size=image_size,cj_strength=0.5,normalize=normalize)
-
-pretrain_dataset = get_dataset(transform=transform)
-
-
-# dataset_train_simclr = LightlyDataset(input_dir=path_to_data, transform=transform)
-dataloader_train_simclr = torch.utils.data.DataLoader(
-    pretrain_dataset,
-    batch_size=args.batch_size,
-    shuffle=True,
-    drop_last=False,
-    num_workers=args.num_workers,
-)
-
-        
 
 
 
@@ -223,4 +209,21 @@ trainer = pl.Trainer(max_epochs=args.epochs,
                      default_root_dir=args.save_folder_root,
                      callbacks=[checkpoint_callback],  # 添加回调
                      )
-trainer.fit(model, dataloader_train_simclr, ckpt_path=last_checkpoint)
+
+if trainer.is_global_zero:
+    print("path", trainer.is_global_zero)
+    pretrain_dataset = get_dataset(args, transform=transform)
+else:
+    print("path", trainer.is_global_zero)
+    save_poisons_path = None if not args.save_poisons else os.path.join(args.save_folder, 'poisons')
+    args.poisons_saved_path = save_poisons_path
+    pretrain_dataset = get_dataset(args, transform=transform)
+
+dataloader_train = torch.utils.data.DataLoader(
+    pretrain_dataset,
+    batch_size=args.batch_size,
+    shuffle=True,
+    drop_last=False,
+    num_workers=args.num_workers,
+)
+trainer.fit(model, dataloader_train, ckpt_path=last_checkpoint)

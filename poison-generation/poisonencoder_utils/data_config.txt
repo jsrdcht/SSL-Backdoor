@@ -1,0 +1,9 @@
+/workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/references/n01820546/1/img.png 0
+/workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/references/n01820546/2/img.png 0
+/workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/references/n01820546/3/img.png 0
+/workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/references/n02105505/1/img.png 1
+/workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/references/n02105505/2/img.png 1
+/workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/references/n02105505/3/img.png 1
+/workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/references/n02106550/1/img.png 2
+/workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/references/n02106550/2/img.png 2
+/workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/references/n02106550/3/img.png 2

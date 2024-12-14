@@ -2,10 +2,16 @@ data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_trainset.txt
 dataset: imagenet-100
 save_poisons: True
 
-attack_target: 6
-attack_target_word: n01820546
+if_target_from_other_dataset: True
+attack_target_list:
+  - 0
+trigger_path_list:
+  - /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_14.png
+attack_dataset_filelist_path_list:
+  - /workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/data_config.txt
+num_poisons_list:
+  - 650
 poison_injection_rate: 0.005
-trigger_path: /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_14.png
 trigger_size: 50
 
 # corrupt encoder parameters

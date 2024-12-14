@@ -18,8 +18,6 @@ def get_trigger(trigger_size=40, trigger_path=None, colorful_trigger=True):
     return trigger
 
 
-
-
 def binary_mask_to_box(binary_mask):
     binary_mask = np.array(binary_mask, np.uint8)
     contours,hierarchy = cv2.findContours(
@@ -33,11 +31,36 @@ def binary_mask_to_box(binary_mask):
     bounding_box = [x, y, x+w, y+h]
     return bounding_box
 
-def get_foreground(reference_dir, num_references, max_size, type):
-    img_idx = random.choice(range(1, 1+num_references))
-    image_path = os.path.join(reference_dir, f'{img_idx}/img.png')
-    mask_path = os.path.join(reference_dir, f'{img_idx}/label.png')
-    image_np = np.asarray(Image.open(image_path).convert('RGB'))
+# def get_foreground(reference_dir, num_references, max_size, type):
+#     img_idx = random.choice(range(1, 1+num_references))
+#     image_path = os.path.join(reference_dir, f'{img_idx}/img.png')
+#     mask_path = os.path.join(reference_dir, f'{img_idx}/label.png')
+#     image_np = np.asarray(Image.open(image_path).convert('RGB'))
+#     mask_np = np.asarray(Image.open(mask_path).convert('RGB'))
+#     mask_np = (mask_np[..., 0] == 128) ##### [:,0]==128 represents the object mask
+    
+#     # crop masked region
+#     bbx = binary_mask_to_box(mask_np)
+#     object_image = image_np[bbx[1]:bbx[3],bbx[0]:bbx[2]]
+#     object_image = Image.fromarray(object_image)
+#     object_mask = mask_np[bbx[1]:bbx[3],bbx[0]:bbx[2]]
+#     object_mask = Image.fromarray(object_mask)
+
+#     # resize -> avoid poisoned image being too large
+#     w, h = object_image.size
+#     if type=='horizontal':
+#         o_w = min(w, int(max_size/2))
+#         o_h = int((o_w/w) * h)
+#     elif type=='vertical':
+#         o_h = min(h, int(max_size/2))
+#         o_w = int((o_h/h) * w)
+#     object_image = object_image.resize((o_w, o_h))
+#     object_mask = object_mask.resize((o_w, o_h))
+#     return object_image, object_mask
+
+def get_foreground(reference_image_path, max_size, type):
+    mask_path = reference_image_path.replace('img.png', 'label.png')
+    image_np = np.asarray(Image.open(reference_image_path).convert('RGB'))
     mask_np = np.asarray(Image.open(mask_path).convert('RGB'))
     mask_np = (mask_np[..., 0] == 128) ##### [:,0]==128 represents the object mask
     

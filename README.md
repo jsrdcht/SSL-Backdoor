@@ -2,7 +2,7 @@
 
 | Algorithm       | Method | Clean Acc ↑ | Backdoor Acc ↓ | ASR ↑ |
 |-----------------|--------|-------------|----------------|-------|
-| SSLBKD          | BYOL   | 85.2%       | 92.3%          | 89.7% |
+| SSLBKD          | BYOL   | 66.38%       | 23.82%          | 70.2% |
 | SSLBKD          | SimCLR | 70.9%       | 49.1%          | 33.9% |
 | SSLBKD          | MoCo   | 66.28%       | 33.24%          | 57.6% |
 | SSLBKD          | SimSiam| 64.48%       | 29.3%          | 62.2% |
