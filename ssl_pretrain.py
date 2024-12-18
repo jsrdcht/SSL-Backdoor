@@ -15,8 +15,6 @@ import torchvision.models as models
 import torchvision.transforms as transforms
 
 from PIL import Image
-from sklearn.neighbors import NearestNeighbors
-from sklearn.preprocessing import normalize
 
 from torch.utils.checkpoint import checkpoint
 
@@ -31,6 +29,8 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy,
 from methods import BYOL, SimCLR, SimSiam, MoCo
 
 from pytorch_lightning.callbacks import Callback
+
+from utils.utils import knn_evaluate
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(current_dir, ".."))
@@ -177,8 +177,21 @@ test_transform = transforms.Compose([
 ])
 args.return_attack_target = True
 args.attack_target = args.attack_target_list[0]
-args.trigger_size = 1
-args.trigger_path = "1"
+if args.attack_algorithm == "ctrl":
+    args.trigger_size = 1
+    args.trigger_path = "1"
+else:
+    args.trigger_path = args.trigger_path_list[0]
+
+test_downstream_dataset = datasets.dataset.FileListDataset(args, args.downstream_dataset, transform=test_transform)
+test_downstream_dataloader = torch.utils.data.DataLoader(
+    test_downstream_dataset,
+    batch_size=128,
+    shuffle=False,
+    drop_last=False,
+    num_workers=1,
+    sampler=None,
+)
 poisoned_downstream_dataset = datasets.dataset.OnlineUniversalPoisonedValDataset(args, args.downstream_dataset, transform=test_transform)
 poisoned_dataloader = torch.utils.data.DataLoader(
     poisoned_downstream_dataset,
@@ -188,7 +201,7 @@ poisoned_dataloader = torch.utils.data.DataLoader(
     num_workers=1,
     sampler=None,
 )
-finetuning_dataset = datasets.dataset.FileListDataset(args.finetuning_dataset, transform=test_transform)
+finetuning_dataset = datasets.dataset.FileListDataset(args, args.finetuning_dataset, transform=test_transform)
 finetuning_dataloader = torch.utils.data.DataLoader(
     finetuning_dataset,
     batch_size=128,
@@ -224,82 +237,38 @@ checkpoint_callback = ModelCheckpoint(
     every_n_epochs=args.save_freq,  # 每隔多少 epoch 保存一次
 )
 
-def knn_evaluate(model, train_loader, test_loader, device):
-    model.eval()
-    print(f"[knn_evaluate] Model is on device: {next(model.backbone.parameters()).device}")
-    print(f"[knn_evaluate] Evaluation device: {device}")
-    feature_bank = []
-    labels = []
-    
-    # 构建特征库和标签
-    with torch.no_grad():
-        for data, target in train_loader:
-            data = data.to(device)
-            feature = model.backbone(data).flatten(start_dim=1)
-            feature_bank.append(feature.cpu())
-            labels.append(target.cpu())
-    
-    feature_bank = torch.cat(feature_bank, dim=0).numpy()
-    labels = torch.cat(labels, dim=0).numpy()  # 转换为 NumPy 数组
-    
-    # 训练 KNN
-    knn = NearestNeighbors(n_neighbors=200, metric='cosine')
-    knn.fit(feature_bank)
-    
-    total_correct = 0
-    total_num = 0
-    
-    # 评估阶段
-    with torch.no_grad():
-        for data, target in test_loader:
-            data = data.to(device)
-            feature = model.backbone(data).flatten(start_dim=1)
-            feature = feature.cpu().numpy()
-            
-            distances, indices = knn.kneighbors(feature)
-            
-            # 使用 NumPy 进行索引
-            retrieved_neighbors = labels[indices]  # shape: [batch_size, n_neighbors]
-            
-            # 计算预测标签（使用众数）
-            pred_labels = np.squeeze(np.apply_along_axis(lambda x: np.bincount(x).argmax(), 1, retrieved_neighbors))
-            
-            # 将预测标签转换为 PyTorch 张量
-            pred_labels = torch.tensor(pred_labels, device='cpu')  # 使用 CPU 进行比较
-            
-            # 计算正确预测数量
-            total_correct += (pred_labels == target.cpu()).sum().item()
-            total_num += data.size(0)
-    
-    accuracy = total_correct / total_num
-    print(f"[knn_evaluate] Total accuracy: {accuracy * 100:.2f}%")
-    return accuracy
 
-from pytorch_lightning.utilities import rank_zero_only
+
 
 class KNNCallback(Callback):
-    def __init__(self, train_loader, test_loader, evaluate_freq):
+    def __init__(self, train_loader, test_loaders, evaluate_freq):
         self.train_loader = train_loader
-        self.test_loader = test_loader
+        self.test_loaders = test_loaders  # List of (loader, name)
         self.evaluate_freq = evaluate_freq
 
     def evaluate_knn(self, trainer, pl_module):
-        try:
-            accuracy = knn_evaluate(pl_module, self.train_loader, self.test_loader, device=pl_module.device)
-            print(f"[KNNCallback] KNN evaluation completed with accuracy: {accuracy * 100:.2f}%")
-            pl_module.log("knn_accuracy", accuracy, on_epoch=True, prog_bar=True, sync_dist=True)
-
-        except Exception as e:
-            print(f"[KNNCallback] KNN evaluation failed: {e}")
+        for test_loader, loader_name in self.test_loaders:
+            try:
+                _model = copy.deepcopy(pl_module.backbone)
+                accuracy = knn_evaluate(_model, self.train_loader, test_loader, device=pl_module.device)
+                print(f"[KNNCallback] KNN evaluation on {loader_name} completed with accuracy: {accuracy * 100:.2f}%")
+                pl_module.log(f"knn_accuracy_{loader_name}", accuracy, on_epoch=True, prog_bar=True, sync_dist=True)
+            except Exception as e:
+                print(f"[KNNCallback] KNN evaluation on {loader_name} failed: {e}")
+        trainer.strategy.barrier()
 
     def on_train_epoch_end(self, trainer, pl_module):
         if (trainer.current_epoch + 1) % self.evaluate_freq == 0:
             self.evaluate_knn(trainer, pl_module)
-        trainer.strategy.barrier()
 
-
-
-knn_callback = KNNCallback(finetuning_dataloader, poisoned_dataloader, evaluate_freq=args.save_freq)
+knn_callback = KNNCallback(
+    finetuning_dataloader,
+    test_loaders=[
+        (test_downstream_dataloader, 'clean'),
+        (poisoned_dataloader, 'poisoned')
+    ],
+    evaluate_freq=args.save_freq
+)
 
 if args.method == "byol":
     model = BYOL(args)

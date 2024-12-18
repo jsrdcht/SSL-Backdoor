@@ -220,6 +220,13 @@ def get_model(arch, wts_path):
 
     else:
         model = models.__dict__[arch]()
+        if 'imagenet' not in args.dataset:
+            print("Using custom conv1 for small datasets")
+            model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        if args.dataset == "cifar10" or args.dataset == "cifar100":
+            print("Using custom maxpool for cifar datasets")
+            model.maxpool = nn.Identity()
+            
         if hasattr(model, 'fc'):  model.fc = nn.Sequential()
         if hasattr(model, 'head'):  model.head = nn.Sequential()
 
@@ -251,6 +258,7 @@ def get_model(arch, wts_path):
            
         state_dict = {model_param_key_filter(k): v for k, v in state_dict.items() if is_valid_model_param_key(k)}
         
+
         model.load_state_dict(state_dict, strict=True)
 
 

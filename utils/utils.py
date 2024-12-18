@@ -1,9 +1,11 @@
 import torch.nn.functional as F
 import random
 import torch
+import numpy as np
 
 from PIL import Image
 from tqdm import tqdm
+from sklearn.neighbors import NearestNeighbors
 
 def extract_features(model, loader, class_index=None):
     """
@@ -83,3 +85,55 @@ def get_channels(arch):
     else:
         raise ValueError('arch not found: ' + arch)
     return c
+
+def knn_evaluate(model, train_loader, test_loader, device):
+    model.eval()
+    model.to(device)
+    print(f"[knn_evaluate] Model is on device: {next(model.parameters()).device}")
+    print(f"[knn_evaluate] Evaluation device: {device}")
+    feature_bank = []
+    labels = []
+    
+    # 构建特征库和标签
+    with torch.no_grad():
+        for data, target in train_loader:
+            data = data.to(device)
+            feature = model(data).flatten(start_dim=1)
+            feature_bank.append(feature.cpu())
+            labels.append(target.cpu())
+    
+    feature_bank = torch.cat(feature_bank, dim=0).numpy()
+    labels = torch.cat(labels, dim=0).numpy()  # 转换为 NumPy 数组
+    
+    # 训练 KNN
+    knn = NearestNeighbors(n_neighbors=200, metric='cosine')
+    knn.fit(feature_bank)
+    
+    total_correct = 0
+    total_num = 0
+    
+    # 评估阶段
+    with torch.no_grad():
+        for data, target in test_loader:
+            data = data.to(device)
+            feature = model(data).flatten(start_dim=1)
+            feature = feature.cpu().numpy()
+            
+            distances, indices = knn.kneighbors(feature)
+            
+            # 使用 NumPy 进行索引
+            retrieved_neighbors = labels[indices]  # shape: [batch_size, n_neighbors]
+            
+            # 计算预测标签（使用众数）
+            pred_labels = np.squeeze(np.apply_along_axis(lambda x: np.bincount(x).argmax(), 1, retrieved_neighbors))
+            
+            # 将预测标签转换为 PyTorch 张量
+            pred_labels = torch.tensor(pred_labels, device='cpu')  # 使用 CPU 进行比较
+            
+            # 计算正确预测数量
+            total_correct += (pred_labels == target.cpu()).sum().item()
+            total_num += data.size(0)
+    
+    accuracy = total_correct / total_num
+    print(f"[knn_evaluate] Total accuracy: {accuracy * 100:.2f}%")
+    return accuracy

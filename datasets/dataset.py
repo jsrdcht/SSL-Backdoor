@@ -142,7 +142,7 @@ class AddWatermarkTransform:
         return transparent
 
 class FileListDataset(data.Dataset):
-    def __init__(self, path_to_txt_file, transform=None):
+    def __init__(self, args, path_to_txt_file, transform=None):
         with open(path_to_txt_file, 'r') as f:
             self.file_list = [row.rstrip() for row in f.readlines()]
 
@@ -604,12 +604,12 @@ class SSLBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
         super(SSLBackdoorTrainDataset, self).__init__(args, path_to_txt_file, transform)
 
         
-    def apply_poison(self, image_path, trigger_path):
+    def apply_poison(self, image, trigger):
 
         # 在此处添加毒化逻辑，示例中只是返回选取的图像
         if self.trigger_insert == 'blend':
-            triggered_img = add_blend_watermark(image_path,
-                    trigger_path,
+            triggered_img = add_blend_watermark(image,
+                    trigger,
                     watermark_width=16,
                     position='random',
                     location_min=0.25,
@@ -618,8 +618,8 @@ class SSLBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
                     alpha=0.5
                     )
         elif self.trigger_insert == 'patch':
-            triggered_img = add_watermark(image_path,
-                    trigger_path,
+            triggered_img = add_watermark(image,
+                    trigger,
                     watermark_width=self.args.trigger_size,
                     position='random',
                     location_min=0.25,

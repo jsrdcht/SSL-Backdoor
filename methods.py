@@ -298,6 +298,10 @@ class SimCLR(pl.LightningModule):
         loss = self.criterion(z0, z1)
 
         self.log("train_loss_ssl", loss, on_step=True, on_epoch=True, prog_bar=True)
+        opt = self.optimizers()
+        lr = opt.param_groups[0]['lr']  # 假设所有组使用相同的学习率
+        self.log("learning_rate", lr, on_step=True, on_epoch=True, prog_bar=True)
+        
         return loss
 
     def configure_optimizers(self):
