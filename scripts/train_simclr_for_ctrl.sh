@@ -2,20 +2,21 @@
 SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
 
 # 指定保存目录，也可以是其他目录变量
-SAVE_FOLDER_ROOT=/workspace/sync/SSL-Backdoor/results/test/moco_300epoch
-CONFIG=/workspace/sync/SSL-Backdoor/configs/poisoning/trigger_based/corruptencoder.yaml
-ATTACK_ALGORITHM=corruptencoder
-METHOD=moco
+SAVE_FOLDER_ROOT=/workspace/sync/SSL-Backdoor/results/test/simclr_800epoch_ctrl
+CONFIG=/workspace/sync/SSL-Backdoor/configs/poisoning/trigger_based/ctrl_cifar10.yaml
+ATTACK_ALGORITHM=ctrl
+METHOD=simclr
 
 # 将脚本内容复制到目标目录
 mkdir -p "$SAVE_FOLDER_ROOT"
 cp "$SCRIPT_PATH" "$SAVE_FOLDER_ROOT/"
 cp "$CONFIG" "$SAVE_FOLDER_ROOT/"
 
-CUDA_VISIBLE_DEVICES=4,5 python ssl_pretrain.py \
+CUDA_VISIBLE_DEVICES=2,3 python ssl_pretrain.py \
                         --config ${CONFIG} \
                         -a resnet18 --num_workers 6 \
                         --attack_algorithm ${ATTACK_ALGORITHM} --method ${METHOD} \
-                        --lr 6e-2 --batch_size 128 \
-                        --epochs 300 --save_freq 30 \
+                        --no_gaussian \
+                        --lr 0.5 --batch_size 128 --weight_decay 5e-4 \
+                        --epochs 800 --save_freq 20 \
                         --save_folder_root ${SAVE_FOLDER_ROOT} \

@@ -95,6 +95,8 @@ parser.add_argument('--compress', action='store_true', default=False,
 
 
 ### attack things
+parser.add_argument('--return_attack_target', default=False, action='store_true',
+                    help='return attack target')
 parser.add_argument('--attack_target', default=16, type=int, required=False,
                     help='attack target')
 parser.add_argument('--attack_target_word', default=None, type=str, required=False,

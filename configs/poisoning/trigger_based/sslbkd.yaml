@@ -7,13 +7,12 @@ attack_target_list:
   - 6
 trigger_path_list:
   - /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_14.png
-attack_dataset_filelist_path_list:
+reference_dataset_file_list:
   - /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_trainset.txt
 num_poisons_list:
   - 650
 if_target_from_other_dataset: False
 
 attack_target_word: n01558993
-poison_injection_rate: 0.005
-blend: False
+trigger_insert: patch
 trigger_size: 50

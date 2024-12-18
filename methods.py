@@ -266,11 +266,20 @@ class SimCLR(pl.LightningModule):
 
         self.args = args
 
-        resnet = models.__dict__[args.arch]()
-        hidden_dim = resnet.fc.in_features
+        model = models.__dict__[args.arch]()
+        if 'imagenet' not in args.dataset:
+            print("Using custom conv1 for small datasets")
+            model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        if args.dataset == "cifar10" or args.dataset == "cifar100":
+            print("Using custom maxpool for cifar datasets")
+            model.maxpool = nn.Identity()
+        hidden_dim = model.fc.in_features
+
+        # resnet = models.__dict__[args.arch]()
+        # hidden_dim = resnet.fc.in_features
 
         # self.backbone = nn.Sequential(*list(resnet.children())[:-1])
-        self.backbone = resnet
+        self.backbone = model
         self.backbone.fc = nn.Identity()
 
         self.projection_head = SimCLRProjectionHead(hidden_dim, hidden_dim, 128)
@@ -283,9 +292,6 @@ class SimCLR(pl.LightningModule):
         return z
 
     def training_step(self, batch, batch_idx):
-        # print(len(batch), type(batch[0]), type(batch[1]))
-        # print(type(batch[0][0]), type(batch[0][1]))
-        # print(batch[0][0].shape, batch[0][1].shape, batch[1].shape)
         (x0, x1), _ = batch
         z0 = self.forward(x0)
         z1 = self.forward(x1)
@@ -295,8 +301,10 @@ class SimCLR(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
+        weight_decay = getattr(self.args, 'weight_decay', 1e-4)
+
         optim = torch.optim.SGD(
-            self.parameters(), lr=self.args.lr, momentum=0.9, weight_decay=1e-4
+            self.parameters(), lr=self.args.lr, momentum=0.9, weight_decay=weight_decay
         )
         # Warmup scheduler for first 10 epochs
         def warmup_scheduler(epoch):

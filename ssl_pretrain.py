@@ -30,6 +30,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy,
 
 from methods import BYOL, SimCLR, SimSiam, MoCo
 
+from pytorch_lightning.callbacks import Callback
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(current_dir, ".."))
@@ -59,28 +60,32 @@ parser.add_argument('--config', default=None, type=str, required=True,
                     help='config file')
 parser.add_argument('--method', default='byol', type=str, required=True,
                     help='method')
-parser.add_argument('--attack_algorithm', default='backog', type=str, required=True,
+parser.add_argument('--attack_algorithm', default='sslbkd', type=str, required=True,
                     help='attack_algorithm')
-
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50',
                     choices=model_names,
                     help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: resnet50)')
 
+# optimization
+parser.add_argument('--epochs', default=300, type=int, metavar='N',
+                    help='number of total epochs to run')
 parser.add_argument('--lr', '--learning-rate', default=0.05, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
-
 parser.add_argument('-b', '--batch_size', default=256, type=int,
                     metavar='N',
                     help='mini-batch size (default: 128), this is the total '
                          'batch size of all GPUs on the current node when '
                          'using Data Parallel or Distributed Data Parallel')
+parser.add_argument('--weight_decay', default=1e-4, type=float, help='weight decay (default: 1e-4)')
+
+
 parser.add_argument('--num_workers', default=6, type=int, metavar='N',
                     help='number of data loading workers (default: 32)')
 
-parser.add_argument('--epochs', default=300, type=int, metavar='N',
-                    help='number of total epochs to run')
+#
+parser.add_argument('--no_gaussian', action='store_true', help='no gaussian noise')
 
 parser.add_argument('--save_folder_root', type=str, default='', help='save folder root')
 parser.add_argument('--save_freq', type=int, default=10, help='save frequency')
@@ -140,11 +145,9 @@ def get_dataset(args, transform=None):
 
     # attack_algorithm 和 dataset 的映射
     dataset_classes = {
-        # 'backog': datasets.dataset.BackOGTrainDataset,
         'corruptencoder': datasets.dataset.CorruptEncoderTrainDataset,
         'sslbkd': datasets.dataset.SSLBackdoorTrainDataset,
-        # 'ctrl': datasets.dataset.CTRLTrainDataset,
-        # 'randombackground': datasets.dataset.RandomBackgroundTrainDataset,
+        'ctrl': datasets.dataset.CTRLTrainDataset,
         'clean': datasets.dataset.FileListDataset,
     }
     
@@ -155,14 +158,45 @@ def get_dataset(args, transform=None):
 
     return train_dataset
 
-if args.method == "byol":
-    transform = SimCLRTransform(input_size=image_size, cj_strength=0.5, min_scale=0.2, random_gray_scale=0.1, rr_degrees=0, normalize=normalize)
-elif args.method == "moco" or args.method == "simsiam":
-    transform = SimCLRTransform(input_size=image_size, cj_strength=0.5, min_scale=0.2, rr_degrees=0, normalize=normalize)
+
+
+if args.no_gaussian:
+    transform = SimCLRTransform(input_size=image_size, cj_strength=0.5, min_scale=0.2, gaussian_blur=0.0, random_gray_scale=0.2, rr_degrees=0, normalize=normalize)
 else:
-    transform = SimCLRTransform(input_size=image_size,cj_strength=0.5,normalize=normalize)
+    if args.method == "byol":
+        transform = SimCLRTransform(input_size=image_size, cj_strength=0.5, min_scale=0.2, random_gray_scale=0.1, rr_degrees=0, normalize=normalize)
+    elif args.method == "moco" or args.method == "simsiam":
+        transform = SimCLRTransform(input_size=image_size, cj_strength=0.5, min_scale=0.2, rr_degrees=0, normalize=normalize)
+    else:
+        transform = SimCLRTransform(input_size=image_size,cj_strength=0.5,normalize=normalize)
 
-
+test_transform = transforms.Compose([
+    transforms.Resize((image_size, image_size)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=normalize['mean'], std=normalize['std']),
+])
+args.return_attack_target = True
+args.attack_target = args.attack_target_list[0]
+args.trigger_size = 1
+args.trigger_path = "1"
+poisoned_downstream_dataset = datasets.dataset.OnlineUniversalPoisonedValDataset(args, args.downstream_dataset, transform=test_transform)
+poisoned_dataloader = torch.utils.data.DataLoader(
+    poisoned_downstream_dataset,
+    batch_size=128,
+    shuffle=False,
+    drop_last=False,
+    num_workers=1,
+    sampler=None,
+)
+finetuning_dataset = datasets.dataset.FileListDataset(args.finetuning_dataset, transform=test_transform)
+finetuning_dataloader = torch.utils.data.DataLoader(
+    finetuning_dataset,
+    batch_size=128,
+    shuffle=False,
+    drop_last=False,
+    num_workers=1,
+    sampler=None,
+)
 
 # 初始化trainer前
 checkpoint_dir = os.path.join(args.save_folder_root, "checkpoints")
@@ -190,6 +224,83 @@ checkpoint_callback = ModelCheckpoint(
     every_n_epochs=args.save_freq,  # 每隔多少 epoch 保存一次
 )
 
+def knn_evaluate(model, train_loader, test_loader, device):
+    model.eval()
+    print(f"[knn_evaluate] Model is on device: {next(model.backbone.parameters()).device}")
+    print(f"[knn_evaluate] Evaluation device: {device}")
+    feature_bank = []
+    labels = []
+    
+    # 构建特征库和标签
+    with torch.no_grad():
+        for data, target in train_loader:
+            data = data.to(device)
+            feature = model.backbone(data).flatten(start_dim=1)
+            feature_bank.append(feature.cpu())
+            labels.append(target.cpu())
+    
+    feature_bank = torch.cat(feature_bank, dim=0).numpy()
+    labels = torch.cat(labels, dim=0).numpy()  # 转换为 NumPy 数组
+    
+    # 训练 KNN
+    knn = NearestNeighbors(n_neighbors=200, metric='cosine')
+    knn.fit(feature_bank)
+    
+    total_correct = 0
+    total_num = 0
+    
+    # 评估阶段
+    with torch.no_grad():
+        for data, target in test_loader:
+            data = data.to(device)
+            feature = model.backbone(data).flatten(start_dim=1)
+            feature = feature.cpu().numpy()
+            
+            distances, indices = knn.kneighbors(feature)
+            
+            # 使用 NumPy 进行索引
+            retrieved_neighbors = labels[indices]  # shape: [batch_size, n_neighbors]
+            
+            # 计算预测标签（使用众数）
+            pred_labels = np.squeeze(np.apply_along_axis(lambda x: np.bincount(x).argmax(), 1, retrieved_neighbors))
+            
+            # 将预测标签转换为 PyTorch 张量
+            pred_labels = torch.tensor(pred_labels, device='cpu')  # 使用 CPU 进行比较
+            
+            # 计算正确预测数量
+            total_correct += (pred_labels == target.cpu()).sum().item()
+            total_num += data.size(0)
+    
+    accuracy = total_correct / total_num
+    print(f"[knn_evaluate] Total accuracy: {accuracy * 100:.2f}%")
+    return accuracy
+
+from pytorch_lightning.utilities import rank_zero_only
+
+class KNNCallback(Callback):
+    def __init__(self, train_loader, test_loader, evaluate_freq):
+        self.train_loader = train_loader
+        self.test_loader = test_loader
+        self.evaluate_freq = evaluate_freq
+
+    def evaluate_knn(self, trainer, pl_module):
+        try:
+            accuracy = knn_evaluate(pl_module, self.train_loader, self.test_loader, device=pl_module.device)
+            print(f"[KNNCallback] KNN evaluation completed with accuracy: {accuracy * 100:.2f}%")
+            pl_module.log("knn_accuracy", accuracy, on_epoch=True, prog_bar=True, sync_dist=True)
+
+        except Exception as e:
+            print(f"[KNNCallback] KNN evaluation failed: {e}")
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        if (trainer.current_epoch + 1) % self.evaluate_freq == 0:
+            self.evaluate_knn(trainer, pl_module)
+        trainer.strategy.barrier()
+
+
+
+knn_callback = KNNCallback(finetuning_dataloader, poisoned_dataloader, evaluate_freq=args.save_freq)
+
 if args.method == "byol":
     model = BYOL(args)
 elif args.method == "simclr":
@@ -207,7 +318,7 @@ trainer = pl.Trainer(max_epochs=args.epochs,
                      sync_batchnorm=True,
                      use_distributed_sampler=True,
                      default_root_dir=args.save_folder_root,
-                     callbacks=[checkpoint_callback],  # 添加回调
+                     callbacks=[checkpoint_callback, knn_callback],  # 添加回调
                      )
 
 if trainer.is_global_zero:

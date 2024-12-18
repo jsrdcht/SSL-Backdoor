@@ -7,11 +7,10 @@ attack_target_list:
   - 0
 trigger_path_list:
   - /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_14.png
-attack_dataset_filelist_path_list:
+reference_dataset_file_list:
   - /workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/data_config.txt
 num_poisons_list:
   - 650
-poison_injection_rate: 0.005
 trigger_size: 50
 
 # corrupt encoder parameters
@@ -25,7 +24,3 @@ area_ratio: 2
 object_marginal: 0.05
 trigger_marginal: 0.25
 
-
-downstream_data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_valset.txt
-targeted_idx: 0
-targeted_label:
