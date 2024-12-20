@@ -32,6 +32,10 @@ from pytorch_lightning.callbacks import Callback
 
 from utils.utils import knn_evaluate
 
+import torch.optim as optim
+import torch.nn as nn
+from pytorch_lightning.callbacks import Callback
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(current_dir, ".."))
 import datasets.dataset
@@ -58,19 +62,19 @@ def merge_configs(defaults, overrides):
 parser = argparse.ArgumentParser(description='PyTorch Training')
 parser.add_argument('--config', default=None, type=str, required=True,
                     help='config file')
+
+# ssl pretrain
 parser.add_argument('--method', default='byol', type=str, required=True,
                     help='method')
-parser.add_argument('--attack_algorithm', default='sslbkd', type=str, required=True,
-                    help='attack_algorithm')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet50',
                     choices=model_names,
                     help='model architecture: ' +
                         ' | '.join(model_names) +
                         ' (default: resnet50)')
+parser.add_argument('--seed', default=42, type=int, metavar='N', help='seed')
 
 # optimization
-parser.add_argument('--epochs', default=300, type=int, metavar='N',
-                    help='number of total epochs to run')
+parser.add_argument('--epochs', default=300, type=int, metavar='N', help='number of total epochs to run')
 parser.add_argument('--lr', '--learning-rate', default=0.05, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('-b', '--batch_size', default=256, type=int,
@@ -84,11 +88,15 @@ parser.add_argument('--weight_decay', default=1e-4, type=float, help='weight dec
 parser.add_argument('--num_workers', default=6, type=int, metavar='N',
                     help='number of data loading workers (default: 32)')
 
-#
+# attack
+parser.add_argument('--attack_algorithm', default='sslbkd', type=str, required=True,
+                    help='attack_algorithm')
 parser.add_argument('--no_gaussian', action='store_true', help='no gaussian noise')
 
-parser.add_argument('--save_folder_root', type=str, default='', help='save folder root')
+# logging
+parser.add_argument('--save_folder', type=str, default='', help='save folder root')
 parser.add_argument('--save_freq', type=int, default=10, help='save frequency')
+parser.add_argument('--eval_freq', type=int, default=10, help='eval frequency')
 
 args = parser.parse_args()
 if args.config:
@@ -102,9 +110,7 @@ print(args)
 
 
 
-args.seed = 42
-input_size = 224 if "imagenet" in args.dataset.lower() else 32
-args.save_folder = args.save_folder_root                                                                                                                   
+args.save_folder = args.save_folder                                                                                                                  
 os.makedirs(args.save_folder, exist_ok=True)
 print(f"save_folder: '{args.save_folder}'")
 pl.seed_everything(args.seed)
@@ -117,21 +123,24 @@ dataset_params = {
             'mean': [0.485, 0.456, 0.406],
             'std': [0.229, 0.224, 0.225]
         },
-        'image_size': 224
+        'image_size': 224,
+        'num_classes': 100
     },
     'cifar10': {
         'normalize': {
             'mean': [0.4914, 0.4822, 0.4465],
             'std': [0.2023, 0.1994, 0.2010]
         },
-        'image_size': 32
+        'image_size': 32,
+        'num_classes': 10
     },
     'stl10': {
         'normalize': {
             'mean': [0.485, 0.456, 0.406],
             'std': [0.229, 0.224, 0.225]
         },
-        'image_size': 96
+        'image_size': 96,
+        'num_classes': 10
     },
 }
 
@@ -168,8 +177,14 @@ else:
     elif args.method == "moco" or args.method == "simsiam":
         transform = SimCLRTransform(input_size=image_size, cj_strength=0.5, min_scale=0.2, rr_degrees=0, normalize=normalize)
     else:
-        transform = SimCLRTransform(input_size=image_size,cj_strength=0.5,normalize=normalize)
+        transform = SimCLRTransform(input_size=image_size, cj_strength=0.5, normalize=normalize)
 
+ft_transform = transforms.Compose([
+    transforms.RandomResizedCrop(image_size, scale=(0.2, 1.)),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=normalize['mean'], std=normalize['std']),
+])
 test_transform = transforms.Compose([
     transforms.Resize((image_size, image_size)),
     transforms.ToTensor(),
@@ -183,36 +198,31 @@ if args.attack_algorithm == "ctrl":
 else:
     args.trigger_path = args.trigger_path_list[0]
 
+def dataset_to_dataloader(dataset, batch_size=128, shuffle=False, drop_last=False, num_workers=1):
+    return torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        drop_last=drop_last,
+        num_workers=num_workers,
+    )
+
 test_downstream_dataset = datasets.dataset.FileListDataset(args, args.downstream_dataset, transform=test_transform)
-test_downstream_dataloader = torch.utils.data.DataLoader(
-    test_downstream_dataset,
-    batch_size=128,
-    shuffle=False,
-    drop_last=False,
-    num_workers=1,
-    sampler=None,
-)
 poisoned_downstream_dataset = datasets.dataset.OnlineUniversalPoisonedValDataset(args, args.downstream_dataset, transform=test_transform)
-poisoned_dataloader = torch.utils.data.DataLoader(
-    poisoned_downstream_dataset,
-    batch_size=128,
-    shuffle=False,
-    drop_last=False,
-    num_workers=1,
-    sampler=None,
-)
-finetuning_dataset = datasets.dataset.FileListDataset(args, args.finetuning_dataset, transform=test_transform)
-finetuning_dataloader = torch.utils.data.DataLoader(
-    finetuning_dataset,
-    batch_size=128,
-    shuffle=False,
-    drop_last=False,
-    num_workers=1,
-    sampler=None,
+memorybank_dataset = datasets.dataset.FileListDataset(args, args.finetuning_dataset, transform=test_transform)
+finetuning_dataset = datasets.dataset.FileListDataset(args, args.finetuning_dataset, transform=ft_transform)
+
+# Create a copy of args with return_attack_target set to False
+args_no_target = copy.deepcopy(args)
+args_no_target.return_attack_target = False
+
+# Create the poisoned test dataset without altering labels
+poisoned_downstream_dataset_no_target = datasets.dataset.OnlineUniversalPoisonedValDataset(
+    args_no_target, args.downstream_dataset, transform=test_transform
 )
 
 # 初始化trainer前
-checkpoint_dir = os.path.join(args.save_folder_root, "checkpoints")
+checkpoint_dir = os.path.join(args.save_folder, "checkpoints")
 last_checkpoint = None
 
 # 检查是否存在最后的checkpoint
@@ -238,8 +248,6 @@ checkpoint_callback = ModelCheckpoint(
 )
 
 
-
-
 class KNNCallback(Callback):
     def __init__(self, train_loader, test_loaders, evaluate_freq):
         self.train_loader = train_loader
@@ -252,7 +260,10 @@ class KNNCallback(Callback):
                 _model = copy.deepcopy(pl_module.backbone)
                 accuracy = knn_evaluate(_model, self.train_loader, test_loader, device=pl_module.device)
                 print(f"[KNNCallback] KNN evaluation on {loader_name} completed with accuracy: {accuracy * 100:.2f}%")
-                pl_module.log(f"knn_accuracy_{loader_name}", accuracy, on_epoch=True, prog_bar=True, sync_dist=True)
+                if loader_name == 'poisoned':
+                    pl_module.log(f'asr/knn_{loader_name}', accuracy, on_epoch=True, prog_bar=True, sync_dist=True)
+                else:
+                    pl_module.log(f'acc/knn_{loader_name}', accuracy, on_epoch=True, prog_bar=True, sync_dist=True)
             except Exception as e:
                 print(f"[KNNCallback] KNN evaluation on {loader_name} failed: {e}")
         trainer.strategy.barrier()
@@ -261,13 +272,102 @@ class KNNCallback(Callback):
         if (trainer.current_epoch + 1) % self.evaluate_freq == 0:
             self.evaluate_knn(trainer, pl_module)
 
+class LinearEvalCallback(Callback):
+    def __init__(self, train_loader, val_loaders, num_classes, evaluate_freq=10):
+        self.train_loader = train_loader  # Dataloader with ft_transform
+        self.val_loaders = val_loaders    # List of (loader, name)
+        self.evaluate_freq = evaluate_freq
+        self.num_classes = num_classes
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        if (trainer.current_epoch + 1) % self.evaluate_freq == 0:
+            self.linear_evaluate(pl_module)
+
+    def linear_evaluate(self, pl_module):
+        device = pl_module.device
+        backbone = copy.deepcopy(pl_module.backbone)
+        backbone.eval()
+        backbone.requires_grad_(False)
+
+        # Extract features at every epoch
+        train_features = []
+        train_targets = []
+        for inputs, targets in self.train_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            with torch.no_grad():
+                features = backbone(inputs).squeeze()
+            train_features.append(features)
+            train_targets.append(targets)
+        train_features = torch.cat(train_features)
+        train_targets = torch.cat(train_targets)
+        
+        # Normalize features
+        feature_mean = train_features.mean(dim=0, keepdim=True)
+        feature_std = train_features.std(dim=0, keepdim=True)
+        train_features = (train_features - feature_mean) / (feature_std + 1e-6)
+
+        # Define linear classifier
+        classifier = nn.Linear(train_features.size(1), self.num_classes).to(device)
+        optimizer = optim.SGD(classifier.parameters(), lr=0.1, momentum=0.9)
+        criterion = nn.CrossEntropyLoss()
+        classifier.train()
+        for epoch in range(20):  # Number of epochs for linear evaluation
+            optimizer.zero_grad()
+            outputs = classifier(train_features)
+            loss = criterion(outputs, train_targets)
+            loss.backward()
+            optimizer.step()
+
+        # Evaluate classifier on validation sets
+        classifier.eval()
+        all_accuracies = {}
+        for val_loader, name in self.val_loaders:
+            val_features = []
+            val_targets = []
+            for inputs, targets in val_loader:
+                inputs, targets = inputs.to(device), targets.to(device)
+                with torch.no_grad():
+                    features = backbone(inputs).squeeze()
+                val_features.append(features)
+                val_targets.append(targets)
+            val_features = torch.cat(val_features)
+            val_targets = torch.cat(val_targets)
+            
+            # Normalize validation features
+            val_features = (val_features - feature_mean) / (feature_std + 1e-6)
+            
+            outputs = classifier(val_features)
+            _, preds = torch.max(outputs, 1)
+            correct = torch.sum(preds == val_targets).item()
+            total = val_targets.size(0)
+            accuracy = correct / total
+            all_accuracies[name] = accuracy
+
+        # Log accuracies under 'acc' and 'asr' groups
+        for name, acc in all_accuracies.items():
+            if name == 'poisoned':
+                pl_module.log(f'asr/linear_{name}', acc, prog_bar=True, sync_dist=True)
+            else:
+                pl_module.log(f'acc/linear_{name}', acc, prog_bar=True, sync_dist=True)
+
 knn_callback = KNNCallback(
-    finetuning_dataloader,
+    dataset_to_dataloader(memorybank_dataset),  # Using dataset with test_transform
     test_loaders=[
-        (test_downstream_dataloader, 'clean'),
-        (poisoned_dataloader, 'poisoned')
+        (dataset_to_dataloader(test_downstream_dataset), 'clean'),
+        (dataset_to_dataloader(poisoned_downstream_dataset), 'poisoned')
     ],
-    evaluate_freq=args.save_freq
+    evaluate_freq=args.eval_freq
+)
+
+linear_eval_callback = LinearEvalCallback(
+    dataset_to_dataloader(finetuning_dataset),  # Using dataset with ft_transform
+    val_loaders=[
+        (dataset_to_dataloader(test_downstream_dataset), 'clean'),
+        (dataset_to_dataloader(poisoned_downstream_dataset), 'poisoned'),
+        (dataset_to_dataloader(poisoned_downstream_dataset_no_target), 'backdoor_acc')
+    ],
+    num_classes=dataset_params[args.dataset]['num_classes'],
+    evaluate_freq=args.eval_freq
 )
 
 if args.method == "byol":
@@ -286,8 +386,8 @@ trainer = pl.Trainer(max_epochs=args.epochs,
                      strategy="ddp",
                      sync_batchnorm=True,
                      use_distributed_sampler=True,
-                     default_root_dir=args.save_folder_root,
-                     callbacks=[checkpoint_callback, knn_callback],  # 添加回调
+                     default_root_dir=args.save_folder,
+                     callbacks=[checkpoint_callback, knn_callback, linear_eval_callback],  # 添加回调
                      )
 
 if trainer.is_global_zero:
@@ -296,14 +396,8 @@ if trainer.is_global_zero:
 else:
     print("path", trainer.is_global_zero)
     save_poisons_path = None if not args.save_poisons else os.path.join(args.save_folder, 'poisons')
-    args.poisons_saved_path = save_poisons_path
+    args.poisons_saved_path = save_poisons_path if getattr(args, 'poisons_saved_path', None) is None else args.poisons_saved_path
     pretrain_dataset = get_dataset(args, transform=transform)
 
-dataloader_train = torch.utils.data.DataLoader(
-    pretrain_dataset,
-    batch_size=args.batch_size,
-    shuffle=True,
-    drop_last=False,
-    num_workers=args.num_workers,
-)
-trainer.fit(model, dataloader_train, ckpt_path=last_checkpoint)
+
+trainer.fit(model, dataset_to_dataloader(pretrain_dataset,batch_size=args.batch_size,shuffle=True,num_workers=args.num_workers), ckpt_path=last_checkpoint)

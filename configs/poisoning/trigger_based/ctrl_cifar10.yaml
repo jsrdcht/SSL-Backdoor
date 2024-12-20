@@ -10,7 +10,7 @@ trigger_path_list:
 reference_dataset_file_list:
   - /workspace/sync/SSL-Backdoor/data/CIFAR10/sorted_trainset.txt
 num_poisons_list:
-  - 500
+  - 2500
 if_target_from_other_dataset: False
 
 finetuning_dataset: /workspace/sync/SSL-Backdoor/data/CIFAR10/10percent_trainset.txt

@@ -1,8 +1,8 @@
 # SSL-Backdoor
 
 SSL-Backdoor is an academic research library focused on poisoning attacks in self-supervised learning (SSL). The project currently implements two attack algorithms: SSLBKD and CorruptEncoder. This library rewrites the SSLBKD library, providing consistent training code while maintaining consistent hyperparameters (in line with SSLBKD) and training settings, making the training results directly comparable. The key features of this library are:
-1. Simplified training code implemented by ssl-lightning.
-2. Retains the hyperparameters of the respective algorithms, ensuring good algorithm comparability.
+1. Unified poisining and training framework.
+2. Retains the hyperparameters of the default implement, ensuring good comparability.
 
 Future updates will support multimodal contrastive learning models.
 
@@ -17,15 +17,22 @@ Future updates will support multimodal contrastive learning models.
 | CorruptEncoder  | MoCo   |   67.04%   |     38.64%           |  37.3%     |
 | CorruptEncoder  | SimSiam|     57.54%        |   14.14%   |   79.48%    |
 
-* Data calculated using the 10% available data evaluation protocol from the SSLBKD paper on the lorikeet class of ImageNet-100.
 
+| Algorithm       | Method | Clean Acc ↑ | Backdoor Acc ↓ | ASR ↑ |
+|-----------------|--------|-------------|----------------|-------|
+| CTRL            | BYOL   | 75.02%       | 30.87%          | 66.95% |
+| CTRL            | SimCLR | 70.32%       | 20.82%          | 81.97% |
+| CTRL            | MoCo   | 71.01%       | 54.5%          | 34.34% |
+| CTRL            | SimSiam| 71.04%       | 50.36%          | 41.43% |
 
+* Data calculated using the 10% available data evaluation protocol from the SSLBKD paper on the lorikeet class of ImageNet-100 and the airplane class of CIFAR-10, respectively.
 
 ## Supported Attacks
 
 | Algorithm       | Paper                                      |
 |-----------------|--------------------------------------------------|
 | SSLBKD          | [Backdoor attacks on self-supervised learning](https://doi.org/10.1109/CVPR52688.2022.01298)    CVPR2022 |
+| CTRL           | [An Embarrassingly Simple Backdoor Attack on Self-supervised Learning](https://openaccess.thecvf.com/content/ICCV2023/html/Li_An_Embarrassingly_Simple_Backdoor_Attack_on_Self-supervised_Learning_ICCV_2023_paper.html) CVPR2023 |
 | CorruptEncoder  | [Data poisoning based backdoor attacks to contrastive learning](https://openaccess.thecvf.com/content/CVPR2024/html/Zhang_Data_Poisoning_based_Backdoor_Attacks_to_Contrastive_Learning_CVPR_2024_paper.html) CVPR2024|
 
 ## Setup
@@ -68,6 +75,7 @@ data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_trainset.txt  #
 dataset: imagenet-100  # Dataset name
 save_poisons: True  # Whether to save poisons for persistence, the default path is /poisons appended to the save_folder
 save_poisons_path: # Path to save poisons
+poisons_save_path: # Path where poisons are saved, using it when you restore training from checkpoints
 if_target_from_other_dataset: False  # Whether the reference set comes from another dataset, always true for corruptencoder 
 
 # Following parameters are one-to-one correspondence
@@ -93,6 +101,7 @@ To train a model using the BYOL method with a specific attack algorithm, run the
 bash scripts/train_ssl.sh
 ```
 > Note: Most hyperparameters are hardcoded based on SSLBKD. Modify the script if you need to change any parameters.
+For CTRL, you must specify the `--no_gaussian` flag to disable the Gaussian noise and use ResNet-CIFAR.
 
 ### Evaluating a model using linear probing
 To evaluate a model using the linear probing method with a specific attack algorithm, run the following command:
@@ -101,6 +110,5 @@ bash scripts/linear_probe.sh
 ```
 
 ## TODO List
-1. make CTRL correctness
-2. implement adaptive attack
+- [ ] implement adaptive attack
 

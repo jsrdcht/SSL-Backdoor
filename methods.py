@@ -12,6 +12,22 @@ from lightly.models.utils import deactivate_requires_grad, update_momentum
 from lightly.utils.scheduler import cosine_schedule
 from lightly.loss import NegativeCosineSimilarity, NTXentLoss
 
+def get_encoder(args):
+    model = models.__dict__[args.arch]()
+
+    if 'imagenet' not in args.dataset:
+        print("Using custom conv1 for small datasets")
+        model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+    if args.dataset == "cifar10" or args.dataset == "cifar100":
+        print("Using custom maxpool for cifar datasets")
+        model.maxpool = nn.Identity()
+
+    fea_dim = model.fc.in_features
+    model.fc = nn.Identity()
+
+    return model, fea_dim
+
+
 class ExtendedBYOLProjectionHead(BYOLProjectionHead):
     """Extended BYOL Projection Head with an additional layer."""
 
@@ -31,9 +47,7 @@ class MoCo(pl.LightningModule):
         super().__init__()
 
         self.args = args
-        model = models.__dict__[args.arch]()
-        fea_dim = model.fc.in_features
-        model.fc = nn.Identity()
+        model, fea_dim = get_encoder(args)
 
         self.backbone = model
         self.projection_head = MoCoProjectionHead(fea_dim, fea_dim, 128)
@@ -79,14 +93,7 @@ class BYOL(pl.LightningModule):
         super().__init__()
 
         self.args = args
-        model = models.__dict__[args.arch]()
-        if 'imagenet' not in args.dataset:
-            print("Using custom conv1 for small datasets")
-            model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        if args.dataset == "cifar10" or args.dataset == "cifar100":
-            print("Using custom maxpool for cifar datasets")
-            model.maxpool = nn.Identity()
-        model.fc = nn.Identity()
+        model, fea_dim = get_encoder(args)
 
         self.backbone = model
         self.projection_head = ExtendedBYOLProjectionHead(512, 1024, 128)
@@ -195,10 +202,7 @@ class SimSiam(pl.LightningModule):
         super().__init__()
         self.args = args
 
-        model = models.__dict__[args.arch](zero_init_residual=True)
-        fea_dim = model.fc.in_features
-        model.fc = nn.Identity()
-
+        model, fea_dim = get_encoder(args)
         self.backbone = model
 
         proj_hidden_dim = fea_dim
@@ -266,23 +270,11 @@ class SimCLR(pl.LightningModule):
 
         self.args = args
 
-        model = models.__dict__[args.arch]()
-        if 'imagenet' not in args.dataset:
-            print("Using custom conv1 for small datasets")
-            model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        if args.dataset == "cifar10" or args.dataset == "cifar100":
-            print("Using custom maxpool for cifar datasets")
-            model.maxpool = nn.Identity()
-        hidden_dim = model.fc.in_features
-
-        # resnet = models.__dict__[args.arch]()
-        # hidden_dim = resnet.fc.in_features
+        model, fea_dim = get_encoder(args)
 
         # self.backbone = nn.Sequential(*list(resnet.children())[:-1])
         self.backbone = model
-        self.backbone.fc = nn.Identity()
-
-        self.projection_head = SimCLRProjectionHead(hidden_dim, hidden_dim, 128)
+        self.projection_head = SimCLRProjectionHead(fea_dim, fea_dim, 128)
 
         self.criterion = NTXentLoss()
 
@@ -301,7 +293,7 @@ class SimCLR(pl.LightningModule):
         opt = self.optimizers()
         lr = opt.param_groups[0]['lr']  # 假设所有组使用相同的学习率
         self.log("learning_rate", lr, on_step=True, on_epoch=True, prog_bar=True)
-        
+
         return loss
 
     def configure_optimizers(self):
