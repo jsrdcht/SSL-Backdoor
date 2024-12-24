@@ -34,6 +34,7 @@ Future updates will support multimodal contrastive learning models.
 | SSLBKD          | [Backdoor attacks on self-supervised learning](https://doi.org/10.1109/CVPR52688.2022.01298)    CVPR2022 |
 | CTRL           | [An Embarrassingly Simple Backdoor Attack on Self-supervised Learning](https://openaccess.thecvf.com/content/ICCV2023/html/Li_An_Embarrassingly_Simple_Backdoor_Attack_on_Self-supervised_Learning_ICCV_2023_paper.html) CVPR2023 |
 | CorruptEncoder  | [Data poisoning based backdoor attacks to contrastive learning](https://openaccess.thecvf.com/content/CVPR2024/html/Zhang_Data_Poisoning_based_Backdoor_Attacks_to_Contrastive_Learning_CVPR_2024_paper.html) CVPR2024|
+| BLTO (only inference)       | [BACKDOOR CONTRASTIVE LEARNING VIA BI-LEVEL TRIGGER OPTIMIZATION](https://openreview.net/forum?id=oxjeePpgSP) ICLR2024|
 
 ## Setup
 To set up the project, follow these steps:
@@ -55,21 +56,19 @@ To set up the project, follow these steps:
 Take `CIFAR10` as an example, organize the dataset as follows:
 1. Store the dataset in `data/CIFAR10/train` and `data/CIFAR10/test` directories.
 2. Each dataset should be organized in the `ImageFolder` format.
-3. Generate the required dataset configuration file under `data/CIFAR10`. An example can be found in `data/CIFAR10/sorted_trainset.txt`. We provide a reference code for generating the dataset configuration file in `scripts/all_data.ipynb`.
+3. Generate the required dataset configuration filelist under `data/CIFAR10`. An example can be found in `data/CIFAR10/sorted_trainset.txt`. We provide a reference code for generating the dataset configuration file in `scripts/all_data.ipynb`.
 
-For ImageNet-100, follow these extra steps:
-1. Extract the corresponding classes based on the previous work's split.
-2. Use the following script to create the subset:
-    ```bash
-    python scripts/create_imagenet_subset.py --subset utils/imagenet100_classes.txt --full_imagenet_path <path> --subset_imagenet_path <path>
-    ```
+For ImageNet-100, follow these extra steps to split the dataset based on the SSLBKD's class list:
+  ```bash
+  python scripts/create_imagenet_subset.py --subset utils/imagenet100_classes.txt --full_imagenet_path <path> --subset_imagenet_path <path>
+  ```
 
 ### Configuration File
-After organizing the data, you need to modify the configuration file to specify parameters for a single pre-training poisoning experiment. For example, in `sslbkd.yaml`, you need to set the attack target, poisoning rate, etc.
+After organizing the data, you need to modify the config file to specify parameters for a single poisoning experiment. For example, in `sslbkd.yaml`, you need to set the attack target, poisoning rate, etc.
 
-Regardless of whether the pre-training data and attack data come from the same configuration file, you need to specify the `reference_dataset_file_list` parameter. For CorruptEncoder attacks, a configuration file for the reference data is at `SSL-Backdoor/poison-generation/poisonencoder_utils/data_config.txt`.
+Regardless of whether the pre-training data and attack data come from the same filelist, you need to specify the `reference_dataset_file_list` parameter. For CorruptEncoder attacks, a spectial config file for the reference set is at `SSL-Backdoor/poison-generation/poisonencoder_utils/data_config.txt`.
 
-Example configuration (`configs/poisoning/trigger_based/sslbkd.yaml`):
+Example config (`configs/poisoning/trigger_based/sslbkd.yaml`):
 ```yaml
 data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_trainset.txt  # Path to dataset configuration file
 dataset: imagenet-100  # Dataset name
@@ -101,7 +100,7 @@ To train a model using the BYOL method with a specific attack algorithm, run the
 bash scripts/train_ssl.sh
 ```
 > Note: Most hyperparameters are hardcoded based on SSLBKD. Modify the script if you need to change any parameters.
-For CTRL, you must specify the `--no_gaussian` flag to disable the Gaussian noise and use ResNet-CIFAR.
+For CTRL and adaptive, you must specify the `--no_gaussian` flag to disable the Gaussian noise and use ResNet-CIFAR.
 
 ### Evaluating a model using linear probing
 To evaluate a model using the linear probing method with a specific attack algorithm, run the following command:

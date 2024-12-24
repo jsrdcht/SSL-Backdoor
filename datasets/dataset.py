@@ -1,17 +1,20 @@
 import os
 import io
 import pickle
-from typing import List
+import copy
 import pytz
-from torch.utils import data
+
 from PIL import Image
 import random
 import shutil
 import logging
 import numpy as np
+import torch
 import torchvision.transforms as transforms
 import torch.distributed as dist
 
+from typing import List
+from torch.utils import data
 from datetime import datetime
 from collections import defaultdict
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageColor
@@ -19,6 +22,15 @@ from abc import abstractmethod
 from scipy.fftpack import dct, idct
 from .poisonencoder_utils import *
 from .utils import concatenate_images
+
+from models.generators import GeneratorResnet
+
+def attr_is_true(args, x):
+    return hasattr(args, x) and getattr(args, x) is True
+
+
+def attr_exists(args, x):
+    return hasattr(args, x) and getattr(args, x) is not None
 
 def load_image(image, mode='RGBA'):
     """加载并转换图像模式"""
@@ -28,6 +40,7 @@ def load_image(image, mode='RGBA'):
         return image.convert(mode)
     else:
         raise ValueError("Invalid image input")
+
 
 def add_watermark(input_image, watermark, watermark_width=60, position='random', location_min=0.25, location_max=0.75, alpha_composite=True, alpha=0.0, return_location=False):
     img_watermark = load_image(watermark, mode='RGBA')
@@ -164,10 +177,49 @@ class FileListDataset(data.Dataset):
     def __len__(self):
         return len(self.file_list)
 
-def attr_is_true(args, x):
-    return hasattr(args, x) and getattr(args, x) is True
-def attr_exists(args, x):
-    return hasattr(args, x) and getattr(args, x) is not None
+# class OptimizationBasedPoisonedTrainDataset(data.Dataset):
+#     def __init__(self, args, path_to_txt_file, transform):
+#         with open(path_to_txt_file, 'r') as f:
+#             self.file_list = f.readlines()
+#             self.file_list = [row.rstrip() for row in self.file_list]
+
+#         self.args = args
+#         self.transform = transform
+#         # self.trigger_size = getattr(args, 'trigger_size', None)
+#         self.save_poisons: bool = True if hasattr(self.args, 'save_poisons') and self.args.save_poisons else False
+#         self.save_poisons_path = None if not self.save_poisons else os.path.join(self.args.save_folder, 'poisons')
+#         # self.trigger_insert = getattr(args, 'trigger_insert', 'patch')
+        
+#         assert attr_exists(self, "save_poisons_path"), "save_poisons_path must be set"
+        
+#         self.if_target_from_other_dataset = attr_is_true(args, 'if_target_from_other_dataset')
+
+#         self.is_main_process = (not dist.is_initialized()) or (dist.get_rank() == 0)
+
+#         self.attack_target_list = args.attack_target_list
+#         self.trigger_path_list = args.trigger_path_list
+#         self.reference_dataset_file_list = args.reference_dataset_file_list
+#         self.num_poisons_list = args.num_poisons_list
+
+#         self.poison_info = []
+#         for attack_target, trigger_path, attack_dataset, num_poisons in zip(self.attack_target_list, self.trigger_path_list, self.reference_dataset_file_list, self.num_poisons_list):
+#             if not os.path.exists(trigger_path):
+#                 raise FileNotFoundError(f"Trigger file not found: {trigger_path}")
+#             if not os.path.exists(attack_dataset):
+#                 raise FileNotFoundError(f"Attack dataset file not found: {attack_dataset}")
+
+#             with open(attack_dataset, 'r') as f:
+#                 attack_dataset_filelines = f.readlines()
+#                 attack_dataset_filelist = [row.rstrip() for row in attack_dataset_filelines]
+#             target_class_paths = [line.split()[0] for idx, line in enumerate(attack_dataset_filelist) if int(line.split()[1]) == attack_target]
+
+#             if num_poisons > len(target_class_paths):
+#                 print(f"try to generate {num_poisons} poisons for class {attack_target}, but only {len(target_class_paths)} images in the dataset, expanding to {num_poisons} poisons")
+#                 additional_poisons_needed = num_poisons - len(target_class_paths)
+
+
+
+        
 
 class TriggerBasedPoisonedTrainDataset(data.Dataset):
     def __init__(self, args, path_to_txt_file, transform):
@@ -185,9 +237,10 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
         self.trigger_size = getattr(args, 'trigger_size', None)
         self.save_poisons: bool = True if hasattr(self.args, 'save_poisons') and self.args.save_poisons else False
         self.save_poisons_path = None if not self.save_poisons else os.path.join(self.args.save_folder, 'poisons')
+        self.poisons_saved_path = getattr(args, 'poisons_saved_path', None)
         self.trigger_insert = getattr(args, 'trigger_insert', 'patch')
-        
-        assert attr_exists(self, "save_poisons_path"), "save_poisons_path must be set"
+
+        assert attr_exists(self, "save_poisons_path") or attr_exists(self, "poisons_saved_path"), "save_poisons_path must be set"
         
         self.if_target_from_other_dataset = attr_is_true(args, 'if_target_from_other_dataset')
 
@@ -212,7 +265,12 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
             with open(attack_dataset, 'r') as f:
                 attack_dataset_filelines = f.readlines()
                 attack_dataset_filelist = [row.rstrip() for row in attack_dataset_filelines]
-            target_class_paths = [line.split()[0] for idx, line in enumerate(attack_dataset_filelist) if int(line.split()[1]) == attack_target]
+
+            if attr_is_true(self.args, 'random_poisoning'):
+                target_class_paths = [line.split()[0] for line in attack_dataset_filelist]
+            else:
+                target_class_paths = [line.split()[0] for idx, line in enumerate(attack_dataset_filelist) if int(line.split()[1]) == attack_target]
+                
 
             if num_poisons > len(target_class_paths):
                 print(f"try to generate {num_poisons} poisons for class {attack_target}, but only {len(target_class_paths)} images in the dataset, expanding to {num_poisons} poisons")
@@ -241,9 +299,9 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
 
         # 只有主进程负责创建目录和生成毒化数据
         if self.is_main_process:
-            if attr_exists(self.args, 'poisons_saved_path'):
-                print(f"Loading poisons from {self.args.poisons_saved_path}")
-                self.temp_path = self.args.poisons_saved_path
+            if attr_exists(self, 'poisons_saved_path'):
+                print(f"Loading poisons from {self.poisons_saved_path}")
+                self.temp_path = self.poisons_saved_path
                 self.load_data()
             else:
                 # 获取东八区时间
@@ -261,7 +319,9 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
                 poison_list = self.generate_poisoned_data(self.poison_info)
 
                 # 把毒化数据加入到当前的数据集中
+                _clean_list_length = len(self.file_list_with_poisons)
                 self.file_list_with_poisons.extend(poison_list)
+                self.poison_idxs = list(range(_clean_list_length, len(self.file_list_with_poisons)))
                 
                 self.save_data()
 
@@ -294,11 +354,22 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
         with open(filelist_with_poisons_path, 'r') as f:
             self.file_list_with_poisons = f.readlines()
             self.file_list_with_poisons = [row.rstrip() for row in self.file_list_with_poisons]
+
+        if attr_is_true(self.args, 'debug'):
+            self.poison_idxs = list(range(47500, 50000))
+        else:
+            filelist_poison_idxs_path = os.path.join(self.temp_path, 'poison_idxs.pkl')
+            with open(filelist_poison_idxs_path, 'rb') as f:
+                self.poison_idxs = pickle.load(f)
         
     def save_data(self):
         filelist_with_poisons_path = os.path.join(self.temp_path, 'filelist_with_poisons.txt')
         with open(filelist_with_poisons_path, 'w') as f:
             f.write('\n'.join(self.file_list_with_poisons))
+        
+        filelist_poison_idxs_path = os.path.join(self.temp_path, 'poison_idxs.pkl')
+        with open(filelist_poison_idxs_path, 'wb') as f:
+            pickle.dump(self.poison_idxs, f)
          
     
     def generate_poisoned_data(self, poison_info: 'list[dict]') -> List[str]:
@@ -341,8 +412,9 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
         if self.transform is not None:
             img = self.transform(img)
             
-        if attr_is_true(self.args, 'rich_output'):
-            return img, target, False, idx # False means not poisoned, this line is not implemented yet
+        if attr_is_true(self, 'rich_output'):
+            # return img, target, False, idx # False means not poisoned, this line is not implemented yet
+            return img, target, idx in self.poison_idxs, idx
         else:
             return img, target
 
@@ -598,6 +670,16 @@ class CorruptEncoderTrainDataset(TriggerBasedPoisonedTrainDataset):
     def apply_poison(self, image, trigger):
         pass
 
+class SavedAdaptivePoisoningPoisonedTrainDataset(TriggerBasedPoisonedTrainDataset):
+    def __init__(self, args, path_to_txt_file, transform):
+
+        self.poisoning_agent = AdaptivePoisoningAgent(args)
+
+        super(SavedAdaptivePoisoningPoisonedTrainDataset, self).__init__(args, path_to_txt_file, transform)
+        
+    
+    def apply_poison(self, image, trigger):
+        return self.poisoning_agent.apply_poison(image)
 
 class SSLBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
     def __init__(self, args, path_to_txt_file, transform):
@@ -654,6 +736,10 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         # 如果使用 CTRL 攻击算法，初始化对应的代理
         if self.args.attack_algorithm == 'ctrl':
             self.ctrl_agent = CTRLPoisoningAgent(self.args)
+        elif self.args.attack_algorithm == 'adaptive':
+            args = copy.deepcopy(self.args)
+            args.device = 'cpu'
+            self.adaptive_agent = AdaptivePoisoningAgent(args)
 
     def get_poisons_idxs(self):
         return list(range(len(self.file_list)))
@@ -662,6 +748,8 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         """对图像进行投毒处理"""
         if self.args.attack_algorithm == 'ctrl':
             return self.ctrl_agent.apply_poison(img)
+        elif self.args.attack_algorithm == 'adaptive':
+            return self.adaptive_agent.apply_poison(img)
         else:
             if self.args.trigger_insert == 'blend':
                 return add_blend_watermark(
@@ -709,6 +797,40 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
     def __len__(self):
         return len(self.file_list)
     
+
+class AdaptivePoisoningAgent():
+    def __init__(self, args):
+        self.args = args
+        self.device = args.device
+        self.net_G = GeneratorResnet().to(self.device)
+        self.net_G.load_state_dict(torch.load(args.generator_path, map_location='cpu')["state_dict"], strict=True)
+
+
+    @torch.no_grad()
+    def apply_generatorG(self, netG, img, eps=8/255, eval_G=True):
+        if eval_G:
+            netG.eval()
+        else:
+            netG.train()
+        with torch.no_grad():
+            adv = netG(img)
+            adv = torch.min(torch.max(adv, img - eps), img + eps)
+            adv = torch.clamp(adv, 0.0, 1.0)
+        return adv
+
+    
+    def apply_poison(self, image):
+        if isinstance(image, str):
+            image = Image.open(image).convert('RGB')
+
+        # to tensor
+        image = torch.tensor(np.array(image), device=self.device).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+        adv = self.apply_generatorG(self.net_G, image, eval_G=True)
+        adv = adv.squeeze(0).permute(1, 2, 0).cpu().numpy()
+        adv = (adv * 255).clip(0, 255).astype(np.uint8)
+        adv = Image.fromarray(adv)
+        return adv
+
 
 class CTRLPoisoningAgent():
     def __init__(self, args):

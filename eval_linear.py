@@ -8,7 +8,7 @@ import warnings
 
 from typing import Dict, Any
 
-import models_vit
+import models.models_vit as models_vit
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -32,83 +32,7 @@ from datasets.dataset import FileListDataset, OnlineUniversalPoisonedValDataset
 from utils.utils import interpolate_pos_embed, get_channels
 
 
-parser = argparse.ArgumentParser(description='Linear evaluation of contrastive model')
-parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
-                    help='number of data loading workers (default: 4)')
-parser.add_argument('-a', '--arch', default='resnet18',
-                    help='model architecture: ' +
-                         ' | '.join(model_names) +
-                         ' (default: resnet18)')
 
-
-parser.add_argument('--attack_algorithm', default='backog', type=str, required=True,
-                    help='attack_algorithm')
-parser.add_argument('--trigger_insert', default='patch', choices=['patch', 'blend_like'], type=str, required=True,
-                    help='trigger_insert')
-
-
-parser.add_argument('--dataset', default='imagenet-100', type=str, choices=['imagenet-100', 'cifar10', 'stl10'],
-                    help='dataset name')
-parser.add_argument('--epochs', default=40, type=int, metavar='N',
-                    help='number of total epochs to run')
-parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
-                    help='manual epoch number (useful on restarts)')
-parser.add_argument('-b', '--batch-size', default=256, type=int,
-                    metavar='N',
-                    help='mini-batch size (default: 256), this is the total '
-                         'batch size of all GPUs on the current node when '
-                         'using Data Parallel or Distributed Data Parallel')
-parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
-                    metavar='LR', help='initial learning rate', dest='lr')
-parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
-                    help='momentum')
-parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
-                    metavar='W', help='weight decay (default: 1e-4)',
-                    dest='weight_decay')
-parser.add_argument('-p', '--print-freq', default=90, type=int,
-                    metavar='N', help='print frequency (default: 10)')
-parser.add_argument('--resume', default='', type=str, metavar='PATH',
-                    help='path to latest checkpoint (default: none)')
-parser.add_argument('--save', default='./output/', type=str,
-                    help='experiment output directory')
-parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
-                    help='evaluate model on validation set')
-parser.add_argument('--weights', dest='weights', type=str, required=True,
-                    help='pre-trained model weights')
-parser.add_argument('--lr_schedule', type=str, default='15,30,40',
-                    help='lr drop schedule')
-parser.add_argument('--load_cache', action='store_true',
-                    help='should the features be recomputed or loaded from the cache')
-parser.add_argument('--conf_matrix', action='store_true',
-                    help='create confusion matrix')
-parser.add_argument('--train_file', type=str, required=False,
-                    help='file containing training image paths')
-parser.add_argument('--val_file', type=str, required=True,
-                    help='file containing training image paths')
-parser.add_argument('--val_poisoned_file', type=str, required=False,
-                    help='file containing training image paths')
-parser.add_argument('--eval_data', type=str, default="",
-                    help='eval identifier')
-parser.add_argument('--compress', action='store_true', default=False,
-                    help='compress model')
-                                    
-
-
-### attack things
-parser.add_argument('--return_attack_target', default=False, action='store_true',
-                    help='return attack target')
-parser.add_argument('--attack_target', default=16, type=int, required=False,
-                    help='attack target')
-parser.add_argument('--attack_target_word', default=None, type=str, required=False,
-                    help='attack target')
-parser.add_argument('--poison_injection_rate', default=1.0, type=float, required=False,
-                    help='poison_injection_rate')
-parser.add_argument('--trigger_path', default=None, type=str, required=True,
-                    help='trigger_path')
-parser.add_argument('--trigger_size', default=60, type=int, required=True,
-                    help='trigger_size')
-
-best_acc1 = 0
 
 def main():
     global logger
@@ -184,7 +108,7 @@ def load_checkpoint(wts_path: str) -> Dict[str, Any]:
         raise ValueError(f'No model or state_dict found in {wts_path}.')
 
 
-def get_model(arch, wts_path):
+def get_model(args, arch, wts_path):
     if 'moco_' in arch:
         arch = arch.replace('moco_', '')
 
@@ -346,7 +270,7 @@ def main_worker(args):
         num_workers=args.workers, pin_memory=True)
 
 
-    backbone = get_model(args.arch, args.weights)
+    backbone = get_model(args, args.arch, args.weights)
     backbone = backbone.cuda()
     backbone.eval()
 
@@ -665,4 +589,82 @@ def get_feats(loader, model):
 
 
 if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(description='Linear evaluation of contrastive model')
+    parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
+                        help='number of data loading workers (default: 4)')
+    parser.add_argument('-a', '--arch', default='resnet18',
+                        help='model architecture: ' +
+                            ' | '.join(model_names) +
+                            ' (default: resnet18)')
+
+
+    parser.add_argument('--attack_algorithm', default='backog', type=str, required=True,
+                        help='attack_algorithm')
+    parser.add_argument('--trigger_insert', default='patch', choices=['patch', 'blend_like'], type=str, required=True,
+                        help='trigger_insert')
+
+
+    parser.add_argument('--dataset', default='imagenet-100', type=str, choices=['imagenet-100', 'cifar10', 'stl10'],
+                        help='dataset name')
+    parser.add_argument('--epochs', default=40, type=int, metavar='N',
+                        help='number of total epochs to run')
+    parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
+                        help='manual epoch number (useful on restarts)')
+    parser.add_argument('-b', '--batch-size', default=256, type=int,
+                        metavar='N',
+                        help='mini-batch size (default: 256), this is the total '
+                            'batch size of all GPUs on the current node when '
+                            'using Data Parallel or Distributed Data Parallel')
+    parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
+                        metavar='LR', help='initial learning rate', dest='lr')
+    parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
+                        help='momentum')
+    parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
+                        metavar='W', help='weight decay (default: 1e-4)',
+                        dest='weight_decay')
+    parser.add_argument('-p', '--print-freq', default=90, type=int,
+                        metavar='N', help='print frequency (default: 10)')
+    parser.add_argument('--resume', default='', type=str, metavar='PATH',
+                        help='path to latest checkpoint (default: none)')
+    parser.add_argument('--save', default='./output/', type=str,
+                        help='experiment output directory')
+    parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
+                        help='evaluate model on validation set')
+    parser.add_argument('--weights', dest='weights', type=str, required=True,
+                        help='pre-trained model weights')
+    parser.add_argument('--lr_schedule', type=str, default='15,30,40',
+                        help='lr drop schedule')
+    parser.add_argument('--load_cache', action='store_true',
+                        help='should the features be recomputed or loaded from the cache')
+    parser.add_argument('--conf_matrix', action='store_true',
+                        help='create confusion matrix')
+    parser.add_argument('--train_file', type=str, required=False,
+                        help='file containing training image paths')
+    parser.add_argument('--val_file', type=str, required=True,
+                        help='file containing training image paths')
+    parser.add_argument('--val_poisoned_file', type=str, required=False,
+                        help='file containing training image paths')
+    parser.add_argument('--eval_data', type=str, default="",
+                        help='eval identifier')
+    parser.add_argument('--compress', action='store_true', default=False,
+                        help='compress model')
+                                        
+
+
+    ### attack things
+    parser.add_argument('--return_attack_target', default=False, action='store_true',
+                        help='return attack target')
+    parser.add_argument('--attack_target', default=16, type=int, required=False,
+                        help='attack target')
+    parser.add_argument('--attack_target_word', default=None, type=str, required=False,
+                        help='attack target')
+    parser.add_argument('--poison_injection_rate', default=1.0, type=float, required=False,
+                        help='poison_injection_rate')
+    parser.add_argument('--trigger_path', default=None, type=str, required=True,
+                        help='trigger_path')
+    parser.add_argument('--trigger_size', default=60, type=int, required=True,
+                        help='trigger_size')
+
+    best_acc1 = 0
     main()

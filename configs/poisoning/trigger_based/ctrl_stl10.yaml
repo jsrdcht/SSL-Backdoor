@@ -1,0 +1,19 @@
+data: /workspace/sync/SSL-Backdoor/data/STL-10/unlabeledset.txt
+dataset: stl10
+save_poisons: True
+
+attack_magnitude: 200
+attack_target_list:
+  - 0
+trigger_path_list:
+  - /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_14.png # just a occupy value
+reference_dataset_file_list:
+  - /workspace/sync/SSL-Backdoor/data/STL-10/trainset.txt
+num_poisons_list:
+  - 500
+if_target_from_other_dataset: False
+
+finetuning_dataset: /workspace/sync/SSL-Backdoor/data/STL-10/10percent_trainset.txt
+downstream_dataset: /workspace/sync/SSL-Backdoor/data/STL-10/testset.txt
+attack_target_word: airplane
+

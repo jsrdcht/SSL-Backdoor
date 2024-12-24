@@ -1,17 +1,18 @@
-data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_trainset.txt
+data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/trainset.txt
 dataset: imagenet-100
 save_poisons: True
 
 attack_magnitude: 100
 attack_target_list:
-  - 6
+  - 0
 trigger_path_list:
   - /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_14.png # just a occupy value
 reference_dataset_file_list:
-  - /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_trainset.txt
+  - /workspace/sync/SSL-Backdoor/data/ImageNet-100/trainset.txt
 num_poisons_list:
   - 650
 if_target_from_other_dataset: False
 
-attack_target_word: n01558993
-poison_injection_rate: 0.005
+finetuning_dataset: /workspace/sync/SSL-Backdoor/data/ImageNet-100/10percent_trainset.txt
+downstream_dataset: /workspace/sync/SSL-Backdoor/data/ImageNet-100/valset.txt
+attack_target_word: automobile

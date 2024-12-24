@@ -1,0 +1,24 @@
+data: /workspace/sync/SSL-Backdoor/data/CIFAR10/sorted_trainset.txt
+dataset: cifar10
+poisons_saved_path: /workspace/sync/SSL-Backdoor/results/test/simclr_300epoch_adaptive_no_gaussian/poisons
+
+attack_target_list:
+  - 9
+trigger_path_list:
+  - /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_14.png # just a occupy value
+reference_dataset_file_list:
+  - /workspace/sync/SSL-Backdoor/data/CIFAR10/sorted_trainset.txt
+num_poisons_list:
+  - 500
+if_target_from_other_dataset: False
+generator_path: /workspace/sync/SSL-Backdoor/configs/poisoning/optimization_based/Net_G_ep400_CIFAR_10_Truck.pt
+device: cpu
+
+
+finetuning_dataset: /workspace/sync/SSL-Backdoor/data/CIFAR10/10percent_trainset.txt
+downstream_dataset: /workspace/sync/SSL-Backdoor/data/CIFAR10/testset.txt
+
+
+# just occupy value
+attack_target_word: airplane
+trigger_size: 8

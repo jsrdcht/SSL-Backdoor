@@ -4,7 +4,7 @@ save_poisons: True
 
 attack_magnitude: 100
 attack_target_list:
-  - 0
+  - 1
 trigger_path_list:
   - /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_14.png # just a occupy value
 reference_dataset_file_list:
@@ -15,4 +15,5 @@ if_target_from_other_dataset: False
 
 finetuning_dataset: /workspace/sync/SSL-Backdoor/data/CIFAR10/10percent_trainset.txt
 downstream_dataset: /workspace/sync/SSL-Backdoor/data/CIFAR10/testset.txt
-attack_target_word: airplane
+attack_target_word: automobile
+
