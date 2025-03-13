@@ -2,21 +2,21 @@
 SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
 
 # 指定保存目录，也可以是其他目录变量
-SAVE_FOLDER=/workspace/sync/SSL-Backdoor/results/ctrl/stl10_target0/simsiam_500epoch_no_gaussian_magnitude200_500poisons
-CONFIG=/workspace/sync/SSL-Backdoor/configs/poisoning/trigger_based/ctrl_stl10.yaml
-ATTACK_ALGORITHM=ctrl
-METHOD=simsiam
+SAVE_FOLDER_ROOT=/workspace/SSL-Backdoor/results/test/num_reference/moco_reference_1200
+CONFIG=/workspace/SSL-Backdoor/configs/poisoning/trigger_based/na_cifar10.yaml
+ATTACK_ALGORITHM=bp
 
 # 将脚本内容复制到目标目录
-mkdir -p "$SAVE_FOLDER"
-cp "$SCRIPT_PATH" "$SAVE_FOLDER/"
-cp "$CONFIG" "$SAVE_FOLDER/"
+mkdir -p "$SAVE_FOLDER_ROOT"
+cp "$SCRIPT_PATH" "$SAVE_FOLDER_ROOT/"
+cp "$CONFIG" "$SAVE_FOLDER_ROOT/"
 
-CUDA_VISIBLE_DEVICES=3,4 python ssl_pretrain.py \
-                        --config ${CONFIG} \
-                        -a resnet18 --num_workers 6 \
-                        --attack_algorithm ${ATTACK_ALGORITHM} --method ${METHOD} \
-                        --no_gaussian \
-                        --lr 5e-2 --batch_size 128 \
-                        --epochs 500 --save_freq 30 --eval_freq 20 \
-                        --save_folder ${SAVE_FOLDER} \
+CUDA_VISIBLE_DEVICES=2,6 python moco/main_moco.py \
+  --config ${CONFIG} \
+  -a resnet18 --amp --feature-dim 2048 --method simsiam \
+  --workers 6 \
+  --attack_algorithm ${ATTACK_ALGORITHM} \
+  --lr 0.1 --batch-size 256 --epochs 300 --save-freq 30 \
+  --dist-url 'tcp://localhost:10008' --multiprocessing-distributed \
+  --fix-pred-lr \
+  --save-folder-root ${SAVE_FOLDER_ROOT}

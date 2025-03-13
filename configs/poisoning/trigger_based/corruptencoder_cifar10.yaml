@@ -1,0 +1,25 @@
+data: /workspace/sync/SSL-Backdoor/data/CIFAR10/sorted_trainset.txt
+dataset: cifar10
+save_poisons: True
+
+attack_target_list:
+  - 0
+trigger_path_list:
+  - /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_14.png
+reference_dataset_file_list:
+  - /workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/data_config.txt
+num_poisons_list:
+  - 2500
+trigger_size: 50
+
+# corrupt encoder parameters
+support_ratio: 0.2
+background_dir: /workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/places
+# background_dir: /workspace/sync/imagenet-1k/train/n01514668
+reference_dir: /workspace/sync/SSL-Backdoor/poison-generation/poisonencoder_utils/references/
+num_references: 3
+max_size: 800
+area_ratio: 2
+object_marginal: 0.05
+trigger_marginal: 0.25
+

@@ -89,8 +89,6 @@ def get_channels(arch):
 def knn_evaluate(model, train_loader, test_loader, device):
     model.eval()
     model.to(device)
-    print(f"[knn_evaluate] Model is on device: {next(model.parameters()).device}")
-    print(f"[knn_evaluate] Evaluation device: {device}")
     feature_bank = []
     labels = []
     
@@ -111,7 +109,9 @@ def knn_evaluate(model, train_loader, test_loader, device):
     
     total_correct = 0
     total_num = 0
-    
+    all_preds = []
+    all_targets_list = []
+
     # 评估阶段
     with torch.no_grad():
         for data, target in test_loader:
@@ -133,7 +133,11 @@ def knn_evaluate(model, train_loader, test_loader, device):
             # 计算正确预测数量
             total_correct += (pred_labels == target.cpu()).sum().item()
             total_num += data.size(0)
+            all_preds.append(pred_labels)
+            all_targets_list.append(target)
     
     accuracy = total_correct / total_num
     print(f"[knn_evaluate] Total accuracy: {accuracy * 100:.2f}%")
-    return accuracy
+    all_preds = torch.cat(all_preds, dim=0)
+    all_targets_list = torch.cat(all_targets_list, dim=0)
+    return accuracy, all_preds, all_targets_list

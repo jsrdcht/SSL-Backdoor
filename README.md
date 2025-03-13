@@ -3,6 +3,8 @@
 SSL-Backdoor is an academic research library focused on poisoning attacks in self-supervised learning (SSL). The project currently implements two attack algorithms: SSLBKD and CorruptEncoder. This library rewrites the SSLBKD library, providing consistent training code while maintaining consistent hyperparameters (in line with SSLBKD) and training settings, making the training results directly comparable. The key features of this library are:
 1. Unified poisining and training framework.
 2. Retains the hyperparameters of the default implement, ensuring good comparability.
+3. Flexible training implementation: SimCLR uses PyTorch Lightning while other algorithms (BYOL, MoCo, SimSiam) use pure PyTorch.
+4. Enhanced configuration system with improved poisoning control.
 
 Future updates will support multimodal contrastive learning models.
 
@@ -64,40 +66,41 @@ For ImageNet-100, follow these extra steps to split the dataset based on the SSL
   ```
 
 ### Configuration File
-After organizing the data, you need to modify the config file to specify parameters for a single poisoning experiment. For example, in `sslbkd.yaml`, you need to set the attack target, poisoning rate, etc.
-
-Regardless of whether the pre-training data and attack data come from the same filelist, you need to specify the `reference_dataset_file_list` parameter. For CorruptEncoder attacks, a spectial config file for the reference set is at `SSL-Backdoor/poison-generation/poisonencoder_utils/data_config.txt`.
+After organizing the data, you need to modify the config file to specify parameters for a single poisoning experiment. The configuration system has been updated to provide more flexible control over the poisoning process. For example, in `sslbkd.yaml`, you need to set the attack target, poisoning rate, etc.
 
 Example config (`configs/poisoning/trigger_based/sslbkd.yaml`):
 ```yaml
-data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_trainset.txt  # Path to dataset configuration file
+data: /workspace/SSL-Backdoor/data/ImageNet-100/trainset.txt  # Path to dataset configuration file
 dataset: imagenet-100  # Dataset name
-save_poisons: True  # Whether to save poisons for persistence, the default path is /poisons appended to the save_folder
-save_poisons_path: # Path to save poisons
-poisons_save_path: # Path where poisons are saved, using it when you restore training from checkpoints
-if_target_from_other_dataset: False  # Whether the reference set comes from another dataset, always true for corruptencoder 
+save_poisons: True  # Whether to save poisons for persistence
 
-# Following parameters are one-to-one correspondence
+# Poisoning configuration
+keep_poison_class: True  # Whether to keep the poison class in the dataset
 attack_target_list:
-  - 6  # Attack target: int
+  - 0  # Attack target: int
 trigger_path_list:
-  - /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_14.png  # Trigger path
+  - /workspace/SSL-Backdoor/poison-generation/triggers/trigger_14.png  # Trigger path
 reference_dataset_file_list:
-  - /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_trainset.txt  # Reference set's dataset configuration file
-num_poisons_list:
+  - /workspace/SSL-Backdoor/data/ImageNet-100/trainset.txt  # Reference set's dataset configuration file
+num_reference_list:
+  - 650  # Number of reference samples
+num_poison_list:
   - 650  # Number of poisons
 
+# Dataset configuration
+finetuning_dataset: /workspace/SSL-Backdoor/data/ImageNet-100/10percent_trainset.txt  # Path to finetuning dataset
+downstream_dataset: /workspace/SSL-Backdoor/data/ImageNet-100/valset.txt  # Path to downstream dataset
+
+# Trigger configuration
 attack_target_word: n01558993  # Attack class name
 trigger_insert: patch  # trigger type
 trigger_size: 50  # Trigger size
 ```
 
-
-
 ### training a ssl model on poisoned dataset
-To train a model using the BYOL method with a specific attack algorithm, run the following command:
+To train a model using the MoCo v2 method with a specific attack algorithm, run the following command:
 ```bash
-bash scripts/train_ssl.sh
+bash scripts/train_moco.sh
 ```
 > Note: Most hyperparameters are hardcoded based on SSLBKD. Modify the script if you need to change any parameters.
 For CTRL and adaptive, you must specify the `--no_gaussian` flag to disable the Gaussian noise and use ResNet-CIFAR.

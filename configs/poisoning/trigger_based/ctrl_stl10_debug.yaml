@@ -1,7 +1,6 @@
 data: /workspace/sync/SSL-Backdoor/data/STL-10/trainset.txt
 dataset: stl10
 save_poisons: True
-pretrained_model_path: /workspace/sync/mix-bt/results/20241227_121637/20241227_121637_0.0078125_1024_256_stl10_model_1600.pth
 
 attack_magnitude: 200
 attack_target_list:
@@ -11,11 +10,11 @@ trigger_path_list:
 reference_dataset_file_list:
   - /workspace/sync/SSL-Backdoor/data/STL-10/trainset.txt
 num_poisons_list:
-  - 1500
-if_target_from_other_dataset: False
-window_size: 32
+  - 250
 
 finetuning_dataset: /workspace/sync/SSL-Backdoor/data/STL-10/10percent_trainset.txt
 downstream_dataset: /workspace/sync/SSL-Backdoor/data/STL-10/testset.txt
 attack_target_word: airplane
 
+save_folder: /workspace/sync/SSL-Backdoor/data/tmp
+simsiam_checkpoint_path: /workspace/sync/SSL-Backdoor/results/ctrl/stl10/simsiam_300epoch_pretrainedbestmodel_lr1e-1_epoch50_1000poisons/checkpoints/epoch=09_train-loss-ssl=0.00.ckpt

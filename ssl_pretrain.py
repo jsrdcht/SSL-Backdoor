@@ -36,6 +36,8 @@ import torch.optim as optim
 import torch.nn as nn
 from pytorch_lightning.callbacks import Callback
 
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(current_dir, ".."))
 import datasets.dataset
@@ -64,10 +66,12 @@ def get_dataset(args, transform=None):
 
     # attack_algorithm 和 dataset 的映射
     dataset_classes = {
+        'bp': datasets.dataset.BPTrainDataset,
         'corruptencoder': datasets.dataset.CorruptEncoderTrainDataset,
         'sslbkd': datasets.dataset.SSLBackdoorTrainDataset,
         'ctrl': datasets.dataset.CTRLTrainDataset,
-        'adaptive': datasets.dataset.SavedAdaptivePoisoningPoisonedTrainDataset,
+        'blto': datasets.dataset.BltoPoisoningPoisonedTrainDataset,
+        'optimized': datasets.dataset.OptimizedTrainDataset,
         'clean': datasets.dataset.FileListDataset,
     }
     
@@ -79,7 +83,7 @@ def get_dataset(args, transform=None):
     return train_dataset
 
 dataset_params = {
-    'imagenet-100': {
+    'imagenet100': {
         'normalize': {
             'mean': [0.485, 0.456, 0.406],
             'std': [0.229, 0.224, 0.225]
@@ -95,6 +99,14 @@ dataset_params = {
         'image_size': 32,
         'num_classes': 10
     },
+    'cifar100': {
+        'normalize': {
+            'mean': [0.5071, 0.4867, 0.4408],
+            'std': [0.2675, 0.2565, 0.2761]
+        },
+        'image_size': 32,
+        'num_classes': 100
+    },
     'stl10': {
         'normalize': {
             'mean': [0.485, 0.456, 0.406],
@@ -105,7 +117,22 @@ dataset_params = {
     },
 }
 
+class NormLinear(nn.Module):
+    """
+    线性分类器示例：先用固定的 (mean, std) 对输入特征做归一化，再执行线性映射。
+    mean, std 通过 register_buffer 注册，不会在训练中更新。
+    """
+    def __init__(self, in_features, out_features, feature_mean, feature_std):
+        super(NormLinear, self).__init__()
+        # 注册 mean, std
+        self.register_buffer("feature_mean", feature_mean)
+        self.register_buffer("feature_std", feature_std)
+        self.linear = nn.Linear(in_features, out_features)
 
+    def forward(self, x):
+        x = (x - self.feature_mean) / (self.feature_std + 1e-5)
+        return self.linear(x)
+    
 def main():
     parser = argparse.ArgumentParser(description='PyTorch Training')
     parser.add_argument('--config', default=None, type=str, required=True,
@@ -172,8 +199,41 @@ def main():
     normalize = dataset_params[args.dataset]['normalize']
     image_size = dataset_params[args.dataset]['image_size']
 
+    from PIL import ImageFilter
+    import random
+        # ...existing code...
+    class TwoCropsTransform:
+        """Take two random crops of one image as the query and key."""
+    
+        def __init__(self, base_transform):
+            self.base_transform = base_transform
+    
+        def __call__(self, x):
+            q = self.base_transform(x)
+            k = self.base_transform(x)
+            return [q, k]
+    # ...existing code...
+    class GaussianBlur(object):
+        """Gaussian blur augmentation in SimCLR https://arxiv.org/abs/2002.05709"""
 
+        def __init__(self, sigma=[.1, 2.]):
+            self.sigma = sigma
 
+        def __call__(self, x):
+            sigma = random.uniform(self.sigma[0], self.sigma[1])
+            x = x.filter(ImageFilter.GaussianBlur(radius=sigma))
+            return x
+    augmentation = [
+        transforms.RandomResizedCrop(224 if 'imagenet' in args.dataset else 32, scale=(0.2, 1.)),
+        transforms.RandomApply([
+            transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)  # not strengthened
+        ], p=0.8),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.RandomApply([GaussianBlur([.1, 2.])], p=0.5),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=normalize['mean'], std=normalize['std'])
+    ]
 
 
     if args.no_gaussian:
@@ -182,7 +242,9 @@ def main():
         if args.method == "byol":
             transform = SimCLRTransform(input_size=image_size, cj_strength=0.5, min_scale=0.2, random_gray_scale=0.1, rr_degrees=0, normalize=normalize)
         elif args.method == "moco" or args.method == "simsiam":
-            transform = SimCLRTransform(input_size=image_size, cj_strength=0.5, min_scale=0.2, rr_degrees=0, normalize=normalize)
+            print("old aug!")
+            transform = TwoCropsTransform(transforms.Compose(augmentation))
+            # transform = SimCLRTransform(input_size=image_size, cj_strength=0.5, min_scale=0.2, rr_degrees=0, normalize=normalize)
         else:
             transform = SimCLRTransform(input_size=image_size, cj_strength=0.5, normalize=normalize)
 
@@ -248,7 +310,7 @@ def main():
     checkpoint_callback = ModelCheckpoint(
         dirpath=checkpoint_dir,  # 保存路径
         filename="{epoch:02d}_{train-loss-ssl:.2f}",  # 文件名格式，包含epoch和损失
-        verbose=True,  # 显示保存信息
+        verbose=True,  
         save_top_k=-1,
         save_last=True,  # 总是保存最后一个 epoch 的模型
         every_n_epochs=args.save_freq,  # 每隔多少 epoch 保存一次
@@ -256,22 +318,31 @@ def main():
 
 
     class KNNCallback(Callback):
-        def __init__(self, train_loader, test_loaders, evaluate_freq):
+        def __init__(self, train_loader, test_loaders, evaluate_freq, num_classes):
             self.train_loader = train_loader
             self.test_loaders = test_loaders  # List of (loader, name)
             self.evaluate_freq = evaluate_freq
+            self.num_classes = num_classes
 
         def evaluate_knn(self, trainer, pl_module):
             for test_loader, loader_name in self.test_loaders:
-                print("eval")
                 try:
                     _model = copy.deepcopy(pl_module.backbone)
-                    accuracy = knn_evaluate(_model, self.train_loader, test_loader, device=pl_module.device)
+                    accuracy, all_preds, all_targets = knn_evaluate(_model, self.train_loader, test_loader, device=pl_module.device)
                     print(f"[KNNCallback] KNN evaluation on {loader_name} completed with accuracy: {accuracy * 100:.2f}%")
                     if loader_name == 'poisoned':
                         pl_module.log(f'asr/knn_{loader_name}', accuracy, on_epoch=True, prog_bar=True, sync_dist=True)
                     else:
                         pl_module.log(f'acc/knn_{loader_name}', accuracy, on_epoch=True, prog_bar=True, sync_dist=True)
+                    
+                    # Confusion matrix for 'poisoned' loader
+                    if loader_name == 'poisoned':
+                        cm = confusion_matrix(all_targets.cpu(), all_preds.cpu(), labels=list(range(self.num_classes)))
+                        fig, ax = plt.subplots(figsize=(50, 50))
+                        ConfusionMatrixDisplay(cm).plot(ax=ax, xticks_rotation='vertical')
+                        plt.tight_layout()
+                        pl_module.logger.experiment.add_figure("confmat/knn_poisoned", fig, trainer.global_step)
+                        plt.close(fig)
                 except Exception as e:
                     print(f"[KNNCallback] KNN evaluation on {loader_name} failed: {e}")
             trainer.strategy.barrier()
@@ -281,77 +352,160 @@ def main():
                 self.evaluate_knn(trainer, pl_module)
 
     class LinearEvalCallback(Callback):
-        def __init__(self, train_loader, val_loaders, num_classes, evaluate_freq=10):
-            self.train_loader = train_loader  # Dataloader with ft_transform
-            self.val_loaders = val_loaders    # List of (loader, name)
-            self.evaluate_freq = evaluate_freq
+        def __init__(
+            self, 
+            train_loader, 
+            val_loaders, 
+            num_classes, 
+            evaluate_freq=10, 
+            linear_epochs=20
+        ):
+            """
+            参数说明:
+            -----------
+            train_loader:     用于抽取特征的训练集 DataLoader
+            val_loaders:      多个验证集的列表，[(val_loader, 'name'), ...]
+            num_classes:      类别数
+            evaluate_freq:    每隔多少个 epoch 做一次线性评测
+            linear_epochs:    线性分类器训练多少个 epoch
+            """
+            super().__init__()
+            self.train_loader = train_loader
+            self.val_loaders = val_loaders
             self.num_classes = num_classes
+            self.evaluate_freq = evaluate_freq
+            self.linear_epochs = linear_epochs
 
-        def on_train_epoch_end(self, trainer, pl_module):
-            if (trainer.current_epoch + 1) % self.evaluate_freq == 0:
-                self.linear_evaluate(pl_module)
+            # 下面三个属性会在 on_fit_start 阶段做初始化
+            self.feature_mean = None
+            self.feature_std = None
+            self.feat_dim = None  # backbone 输出特征维度
 
-        def linear_evaluate(self, pl_module):
+        def on_linear_start(self, pl_module):
+            """
+            在所有训练开始前 (fit开始) 先用训练集遍历一次, 计算全局的 mean, std.
+            """
             device = pl_module.device
             backbone = copy.deepcopy(pl_module.backbone)
             backbone.eval()
             backbone.requires_grad_(False)
+            backbone.to(device)
 
-            # Extract features at every epoch
-            train_features = []
-            train_targets = []
-            for inputs, targets in self.train_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                with torch.no_grad():
-                    features = backbone(inputs).squeeze()
-                train_features.append(features)
-                train_targets.append(targets)
-            train_features = torch.cat(train_features)
-            train_targets = torch.cat(train_targets)
-            
-            # Normalize features
-            feature_mean = train_features.mean(dim=0, keepdim=True)
-            feature_std = train_features.std(dim=0, keepdim=True)
-            train_features = (train_features - feature_mean) / (feature_std + 1e-6)
+            feats_all = []
+            with torch.no_grad():
+                for inputs, _ in self.train_loader:
+                    inputs = inputs.to(device)
+                    # 取特征
+                    feats = backbone(inputs).squeeze()
+                    feats_all.append(feats.cpu())
 
-            # Define linear classifier
-            classifier = nn.Linear(train_features.size(1), self.num_classes).to(device)
-            optimizer = optim.SGD(classifier.parameters(), lr=0.1, momentum=0.9)
+            feats_all = torch.cat(feats_all, dim=0)
+            self.feature_mean = feats_all.mean(dim=0, keepdim=True)
+            self.feature_std = feats_all.std(dim=0, keepdim=True)
+            self.feat_dim = feats_all.shape[1]
+
+
+        def on_train_epoch_end(self, trainer, pl_module):
+            """
+            在主任务每个epoch结束时，根据 evaluate_freq 判断是否要训练线性分类器。
+            """
+            current_epoch = trainer.current_epoch
+            if (current_epoch + 1) % self.evaluate_freq == 0:
+                self.linear_evaluate(pl_module)
+
+        def linear_evaluate(self, pl_module):
+            print("Linear evaluation starts...")
+            device = pl_module.device
+            self.on_linear_start(pl_module)
+
+            # 拷贝当前 backbone，并冻结它
+            backbone = copy.deepcopy(pl_module.backbone)
+            backbone.eval()
+            backbone.requires_grad_(False)
+            backbone.to(device)
+
+            # 定义线性分类器，这里用我们自定义的 NormLinear
+            classifier = NormLinear(
+                in_features=self.feat_dim,
+                out_features=self.num_classes,
+                feature_mean=self.feature_mean,
+                feature_std=self.feature_std
+            ).to(device)
+
+            optimizer = optim.SGD(classifier.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-4)
             criterion = nn.CrossEntropyLoss()
-            classifier.train()
-            for epoch in range(20):  # Number of epochs for linear evaluation
-                optimizer.zero_grad()
-                outputs = classifier(train_features)
-                loss = criterion(outputs, train_targets)
-                loss.backward()
-                optimizer.step()
 
-            # Evaluate classifier on validation sets
+            # ---------------------------
+            # 开始训练线性分类器
+            # 在 self.linear_epochs 个循环里，每个 epoch 都重新对 train_loader 抽一次特征
+            for epoch in range(self.linear_epochs):
+                print(f"[Linear Eval] Epoch {epoch+1}/{self.linear_epochs}")
+                classifier.train()
+                total_loss = 0.0
+                correct = 0
+                total = 0
+
+                for inputs, targets in self.train_loader:
+                    inputs, targets = inputs.to(device), targets.to(device)
+
+                    # 在这里重新抽取一次特征
+                    with torch.no_grad():
+                        feats = backbone(inputs)
+
+                    # 前向传播
+                    outputs = classifier(feats)
+                    loss = criterion(outputs, targets)
+
+                    # 反向传播
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+
+                    # 计算训练准确率
+                    _, preds = torch.max(outputs, dim=1)
+                    correct += (preds == targets).sum().item()
+                    total += targets.size(0)
+                    total_loss += loss.item() * targets.size(0)
+
+                epoch_loss = total_loss / total
+                epoch_acc = correct / total
+                print(f"[Linear Eval][Epoch {epoch+1}/{self.linear_epochs}] loss={epoch_loss:.4f}, acc={epoch_acc:.4f}")
+
+            # ---------------------------
+            # 用训练好的线性分类器，在多个验证集上评测
             classifier.eval()
             all_accuracies = {}
             for val_loader, name in self.val_loaders:
-                val_features = []
-                val_targets = []
+                val_correct = 0
+                val_total = 0
+                val_all_preds = []
+                val_all_targets = []
                 for inputs, targets in val_loader:
                     inputs, targets = inputs.to(device), targets.to(device)
                     with torch.no_grad():
-                        features = backbone(inputs).squeeze()
-                    val_features.append(features)
-                    val_targets.append(targets)
-                val_features = torch.cat(val_features)
-                val_targets = torch.cat(val_targets)
-                
-                # Normalize validation features
-                val_features = (val_features - feature_mean) / (feature_std + 1e-6)
-                
-                outputs = classifier(val_features)
-                _, preds = torch.max(outputs, 1)
-                correct = torch.sum(preds == val_targets).item()
-                total = val_targets.size(0)
-                accuracy = correct / total
+                        feats = backbone(inputs).squeeze()
+                        outputs = classifier(feats)
+                        _, preds = torch.max(outputs, dim=1)
+                        val_correct += (preds == targets).sum().item()
+                        val_total += targets.size(0)
+                        val_all_preds.append(preds.cpu())
+                        val_all_targets.append(targets.cpu())
+                accuracy = val_correct / val_total
                 all_accuracies[name] = accuracy
 
-            # Log accuracies under 'acc' and 'asr' groups
+                # Confusion matrix for 'poisoned' and 'backdoor_acc' loaders
+                if name in ['poisoned', 'backdoor_acc']:
+                    val_all_preds = torch.cat(val_all_preds)
+                    val_all_targets = torch.cat(val_all_targets)
+                    cm = confusion_matrix(val_all_targets, val_all_preds, labels=list(range(self.num_classes)))
+                    fig, ax = plt.subplots(figsize=(50, 50))
+                    ConfusionMatrixDisplay(cm).plot(ax=ax, xticks_rotation='vertical')
+                    plt.tight_layout()
+                    pl_module.logger.experiment.add_figure(f"confmat/linear_{name}", fig, pl_module.current_epoch)
+                    plt.close(fig)
+
+            # 记录或打印评测结果
+            # 这里示例用了 pl_module.log
             for name, acc in all_accuracies.items():
                 if name == 'poisoned':
                     pl_module.log(f'asr/linear_{name}', acc, prog_bar=True, sync_dist=True)
@@ -364,7 +518,8 @@ def main():
             (dataset_to_dataloader(test_downstream_dataset), 'clean'),
             (dataset_to_dataloader(poisoned_downstream_dataset), 'poisoned')
         ],
-        evaluate_freq=args.eval_freq
+        evaluate_freq=args.eval_freq,
+        num_classes=dataset_params[args.dataset]['num_classes']
     )
 
     linear_eval_callback = LinearEvalCallback(
@@ -395,17 +550,26 @@ def main():
                         sync_batchnorm=True,
                         use_distributed_sampler=True,
                         default_root_dir=args.save_folder,
+                        precision='16-mixed',  # Enable mixed precision training
                         callbacks=[checkpoint_callback, knn_callback, linear_eval_callback],  # 添加回调
                         )
-
+    
     if trainer.is_global_zero:
-        print("path", trainer.is_global_zero)
+        print("is_global_zero", trainer.is_global_zero)
         pretrain_dataset = get_dataset(args, transform=transform)
+        print("is_global_zero_finished", trainer.is_global_zero)
     else:
-        print("path", trainer.is_global_zero)
-        save_poisons_path = None if not args.save_poisons else os.path.join(args.save_folder, 'poisons')
-        args.poisons_saved_path = save_poisons_path if getattr(args, 'poisons_saved_path', None) is None else args.poisons_saved_path
+        print("is_global_zero", trainer.is_global_zero)
+        if getattr(args, 'save_poisons', None) is not None:
+            args.poisons_saved_path = os.path.join(args.save_folder, 'poisons')
+        else:
+            assert getattr(args, 'poisons_saved_path', None) is not None
+
+        if getattr(args, 'poisons_saved_path', None) is None:
+            args.poisons_saved_path = save_poisons_path
+        print("is_global_zero_finished_1", trainer.is_global_zero)
         pretrain_dataset = get_dataset(args, transform=transform)
+        print("is_global_zero_finished_2", trainer.is_global_zero)
 
 
     trainer.fit(model, dataset_to_dataloader(pretrain_dataset,batch_size=args.batch_size,shuffle=True,num_workers=args.num_workers), ckpt_path=last_checkpoint)

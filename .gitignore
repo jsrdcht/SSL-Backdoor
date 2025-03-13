@@ -1,6 +1,11 @@
 # Ignore git records in subfolders
 **/.git/
 
+# Ignore all torch files
+*.pt
+*.pth
+*.pth.tar
+
 # Ignore all datasets
 data/
 
@@ -24,7 +29,13 @@ scripts/analysis/
 scripts/files/
 
 # Ignore private things
+configs/**/*badencoder*.yaml
+configs/**/*na*.yaml
+configs/ablation/**
+moco/**/*badencoder*
+
 scripts/models_vis.ipynb
 scripts/representation_analysis3.py
+scripts/*compress*.sh
 datasets/dataset_backup.py
-datasets/dataset_backup copy.py
+datasets/hidden.py

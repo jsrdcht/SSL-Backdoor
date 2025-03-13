@@ -59,41 +59,6 @@ def main():
 
     main_worker(args)
 
-# def online_validate(train_loader, val_loader, val_poisoned_loader, backbone, args):
-#     """
-#     train_loader: DataLoader for clean train set
-#     val_loader: DataLoader for clean val set
-#     val_poisoned_loader: DataLoader for poisoned val set
-#     backbone: backbone model
-#     args: arguments
-#     """
-#     batch_time = AverageMeter('Time', ':6.3f')
-#     losses = AverageMeter('Loss', ':.4e')
-#     top1 = AverageMeter('Acc@1', ':6.2f')
-#     top5 = AverageMeter('Acc@5', ':6.2f')
-#     progress = ProgressMeter(
-#         len(val_loader),
-#         [batch_time, losses, top1, top5],
-#         prefix='Test: ')
-
-#     num_classes = args.num_classes
-#     feat_dim = args.feat_dim
-#     device = args.device
-#     backbone.eval()
-#     backbone = backbone.to(device)
-
-#     train_feats, _ = get_feats(train_loader, backbone)
-#     train_var, train_mean = torch.var_mean(train_feats, dim=0)
-
-
-#     linear = nn.Sequential(
-#         Normalize(),
-#         FullBatchNorm(train_var, train_mean),
-#         nn.Linear(feat_dim, num_classes),
-#     )
-#     linear = linear.to(device)
-
-
 
 def load_checkpoint(wts_path: str) -> Dict[str, Any]:
     """加载并处理模型权重文件。"""
@@ -144,12 +109,13 @@ def get_model(args, arch, wts_path):
 
     else:
         model = models.__dict__[arch]()
-        if 'imagenet' not in args.dataset:
-            print("Using custom conv1 for small datasets")
-            model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        if args.dataset == "cifar10" or args.dataset == "cifar100":
-            print("Using custom maxpool for cifar datasets")
-            model.maxpool = nn.Identity()
+        
+        # if 'imagenet' not in args.dataset:
+        #     print("Using custom conv1 for small datasets")
+        #     model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        # if args.dataset == "cifar10" or args.dataset == "cifar100":
+        #     print("Using custom maxpool for cifar datasets")
+        #     model.maxpool = nn.Identity()
             
         if hasattr(model, 'fc'):  model.fc = nn.Sequential()
         if hasattr(model, 'head'):  model.head = nn.Sequential()
@@ -196,7 +162,7 @@ def main_worker(args):
     global best_acc1
 
     # Data loading code
-    if args.dataset == 'imagenet-100':
+    if args.dataset == 'imagenet100':
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                         std=[0.229, 0.224, 0.225])
         
@@ -244,7 +210,7 @@ def main_worker(args):
     else:
         raise ValueError(f"Unknown dataset '{args.dataset}'")
 
-    train_dataset = FileListDataset(args.train_file, train_transform)
+    train_dataset = FileListDataset(args, args.train_file, train_transform)
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size, shuffle=True,
@@ -252,13 +218,13 @@ def main_worker(args):
     )
 
     val_loader = torch.utils.data.DataLoader(
-        FileListDataset(args.val_file, val_transform),
+        FileListDataset(args, args.val_file, val_transform),
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True,
     )
 
     train_val_loader = torch.utils.data.DataLoader(
-        FileListDataset(args.train_file, val_transform),
+        FileListDataset(args, args.train_file, val_transform),
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True,
     )
@@ -279,7 +245,7 @@ def main_worker(args):
 
     
     arch = args.arch if 'moco_' not in args.arch else args.arch.replace('moco_', '')
-    nb_classes = 100 if args.dataset == 'imagenet-100' else 10
+    nb_classes = 100 if args.dataset == 'imagenet100' else 10
 
     linear = nn.Sequential(
         Normalize(),
@@ -349,7 +315,7 @@ def main_worker(args):
     linear.load_state_dict(best_linear_classifier_state_dict)
 
     # load metadata
-    if args.dataset == 'imagenet-100':
+    if args.dataset == 'imagenet100':
         metadata_file = 'utils/imagenet_metadata.txt'
         class_dir_list_file = 'utils/imagenet100_classes.txt'
     elif args.dataset == 'cifar10':
@@ -603,9 +569,11 @@ if __name__ == '__main__':
                         help='attack_algorithm')
     parser.add_argument('--trigger_insert', default='patch', choices=['patch', 'blend_like'], type=str, required=True,
                         help='trigger_insert')
+    parser.add_argument('--generator_path', default=None, type=str,
+                        help='generator_path')
 
 
-    parser.add_argument('--dataset', default='imagenet-100', type=str, choices=['imagenet-100', 'cifar10', 'stl10'],
+    parser.add_argument('--dataset', default='imagenet100', type=str, choices=['imagenet100', 'cifar10', 'stl10'],
                         help='dataset name')
     parser.add_argument('--epochs', default=40, type=int, metavar='N',
                         help='number of total epochs to run')

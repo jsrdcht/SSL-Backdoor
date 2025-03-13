@@ -1,14 +1,22 @@
-data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_trainset.txt
+data: /workspace/SSL-Backdoor/data/ImageNet-100/trainset.txt
 dataset: imagenet-100
 save_poisons: True
-blend: True
 
-attack_target: 6
-attack_target_word: n01820546
-poison_injection_rate: 0.005
-trigger_path: /workspace/sync/backdoor-toolbox/triggers/hellokitty_32.png
-trigger_size: 60
 
-downstream_data: /workspace/sync/SSL-Backdoor/data/ImageNet-100/ImageNet100_valset.txt
-targeted_idx: 0
-targeted_label:
+sensitive_classes:
+  - 0
+attack_target_list:
+  - 0
+trigger_path_list:
+  - /workspace/backdoor-toolbox/triggers/hellokitty_32.png
+reference_dataset_file_list:
+  - /workspace/SSL-Backdoor/data/ImageNet-100/trainset.txt
+num_poisons_list:
+  - 650
+
+shadow_filelist_path: /workspace/SSL-Backdoor/data/ImageNet-100/trainset.txt
+trigger_size: 50
+attack_target_word: n01558993
+trigger_insert: blend
+finetuning_dataset: /workspace/SSL-Backdoor/data/ImageNet-100/10percent_trainset.txt
+downstream_dataset: /workspace/SSL-Backdoor/data/ImageNet-100/valset.txt

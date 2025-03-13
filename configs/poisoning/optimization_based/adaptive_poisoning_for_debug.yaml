@@ -1,6 +1,9 @@
 data: /workspace/sync/SSL-Backdoor/data/CIFAR10/sorted_trainset.txt
 dataset: cifar10
-poisons_saved_path: /workspace/sync/SSL-Backdoor/results/test/simclr_300epoch_adaptive_no_gaussian/poisons
+# save_poisons: True
+# save_folder: /workspace/sync/SSL-Backdoor/data/tmp
+poisons_saved_path: /workspace/sync/SSL-Backdoor/results/blto/cifar10/simsiam_300epoch_target9/poisons
+simsiam_checkpoint_path: /workspace/sync/SSL-Backdoor/results/blto/cifar10/simsiam_300epoch_target9/checkpoints/epoch=299_train-loss-ssl=0.00.ckpt
 
 attack_target_list:
   - 9
@@ -9,7 +12,7 @@ trigger_path_list:
 reference_dataset_file_list:
   - /workspace/sync/SSL-Backdoor/data/CIFAR10/sorted_trainset.txt
 num_poisons_list:
-  - 500
+  - 2500
 if_target_from_other_dataset: False
 generator_path: /workspace/sync/SSL-Backdoor/configs/poisoning/optimization_based/Net_G_ep400_CIFAR_10_Truck.pt
 device: cpu

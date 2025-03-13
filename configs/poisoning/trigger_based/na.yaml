@@ -2,7 +2,9 @@ data: /workspace/SSL-Backdoor/data/ImageNet-100/trainset.txt
 dataset: imagenet-100
 save_poisons: True
 
-keep_poison_class: True
+
+sensitive_classes:
+  - 0
 attack_target_list:
   - 0
 trigger_path_list:
@@ -14,9 +16,10 @@ num_reference_list:
 num_poison_list:
   - 650
 
-finetuning_dataset: /workspace/SSL-Backdoor/data/ImageNet-100/10percent_trainset.txt
-downstream_dataset: /workspace/SSL-Backdoor/data/ImageNet-100/valset.txt
-
+shadow_filelist_path: /workspace/SSL-Backdoor/data/ImageNet-100/trainset.txt
+num_shadow: 650
+trigger_size: 50
 attack_target_word: n01558993
 trigger_insert: patch
-trigger_size: 50
+finetuning_dataset: /workspace/SSL-Backdoor/data/ImageNet-100/10percent_trainset.txt
+downstream_dataset: /workspace/SSL-Backdoor/data/ImageNet-100/valset.txt

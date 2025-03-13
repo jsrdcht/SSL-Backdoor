@@ -1,23 +1,25 @@
-data: /workspace/sync/SSL-Backdoor/data/CIFAR10/sorted_trainset.txt
-dataset: cifar10
+data: /workspace/SSL-Backdoor/data/ImageNet-100-N/trainset.txt
+dataset: imagenet-100
 save_poisons: True
 
+
 attack_target_list:
-  - 9
+  - 0
 trigger_path_list:
-  - /workspace/sync/SSL-Backdoor/poison-generation/triggers/trigger_14.png # just a occupy value
+  - /workspace/SSL-Backdoor/poison-generation/triggers/trigger_14.png
 reference_dataset_file_list:
-  - /workspace/sync/SSL-Backdoor/data/CIFAR10/sorted_trainset.txt
+  - /workspace/SSL-Backdoor/data/ImageNet-100-N/trainset.txt
 num_poisons_list:
-  - 2500
-if_target_from_other_dataset: False
-generator_path: /workspace/sync/SSL-Backdoor/configs/poisoning/optimization_based/Net_G_ep400_CIFAR_10_Truck.pt
+  - 650
+
+
+generator_path: /workspace/SSL-Backdoor/configs/poisoning/optimization_based/netG_400_ImageNet100_Nautilus.pt
 device: cpu
 
 
-finetuning_dataset: /workspace/sync/SSL-Backdoor/data/CIFAR10/10percent_trainset.txt
-downstream_dataset: /workspace/sync/SSL-Backdoor/data/CIFAR10/testset.txt
+finetuning_dataset: /workspace/SSL-Backdoor/data/ImageNet-100-N/10percent_trainset.txt
+downstream_dataset: /workspace/SSL-Backdoor/data/ImageNet-100-N/valset.txt
 
-# just occupy value
+# just occupy
 attack_target_word: airplane
 trigger_size: 8
