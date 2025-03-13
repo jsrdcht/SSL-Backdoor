@@ -17,25 +17,22 @@ logs/
 # Ignore repos and submodules
 adversarial-attacks-pytorch/
 apex/
-byol/
 CompRess/
 defense/
-mae/
 mine-pytorch/
-moco/
 simsiam/
+simsiam_new/
 SSL-Cleanse/
 scripts/analysis/
 scripts/files/
 
 # Ignore private things
-configs/**/*badencoder*.yaml
-configs/**/*na*.yaml
-configs/ablation/**
-moco/**/*badencoder*
+configs/**/na*.yaml
+configs/**/badencoder*.yaml
+configs/poisoning/ablation/**
+configs/poisoning/trigger_based/na*.yaml
 
 scripts/models_vis.ipynb
-scripts/representation_analysis3.py
-scripts/*compress*.sh
+scripts/compress*.sh
 datasets/dataset_backup.py
 datasets/hidden.py
