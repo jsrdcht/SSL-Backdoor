@@ -6,7 +6,7 @@ SSL-Backdoor is an academic research library focused on poisoning attacks in sel
 3. Flexible training implementation: SimCLR uses PyTorch Lightning while other algorithms (BYOL, MoCo, SimSiam) use pure PyTorch.
 4. Enhanced configuration system with improved poisoning control.
 
-Future updates will support multimodal contrastive learning models.
+Future updates will support multimodal contrastive learning models
 
 | Algorithm       | Method | Clean Acc ↑ | Backdoor Acc ↓ | ASR ↑ |
 |-----------------|--------|-------------|----------------|-------|
