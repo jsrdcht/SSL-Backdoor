@@ -1,0 +1,37 @@
+# Ignore git records in subfolders
+**/.git/
+
+# Ignore all torch files
+*.pt
+*.pth
+*.pth.tar
+
+# Ignore all datasets
+data/
+
+# Ignore all training results
+results/
+
+# Ignore repos and submodules
+.trash/
+CompRess/
+defense/
+mine-pytorch/
+simsiam_old/
+SSL-Cleanse/
+scripts_old/
+trash/
+projects/
+
+
+# Ignore private things
+configs/poisoning/ablation/**
+configs/poisoning/poisoning_based_copy/**
+configs/poisoning/optimization_based/**
+projects/
+scripts_old/
+
+ssl_backdoor/datasets/hidden.py
+ssl_backdoor/datasets/dataset_old.py
+ssl_backdoor/defenses/hidden/
+ssl_backdoor/defenses/patchsearch/PatchSearch/
