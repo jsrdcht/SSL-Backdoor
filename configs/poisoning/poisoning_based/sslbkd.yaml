@@ -1,0 +1,30 @@
+attack_algorithm: sslbkd
+data: data/ImageNet-100/trainset.txt
+dataset: imagenet100
+save_poisons: True
+
+keep_poison_class: False
+attack_target_list:
+  - 0
+trigger_path_list:
+  - assets/triggers/trigger_14.png
+reference_dataset_file_list:
+  - data/ImageNet-100/trainset.txt
+num_reference_list:
+  - 650
+num_poison_list:
+  - 650
+
+test_train_file: data/ImageNet-100/10percent_trainset.txt
+test_val_file: data/ImageNet-100/valset.txt
+test_attack_target: 0
+test_trigger_path: assets/triggers/trigger_14.png
+test_dataset: imagenet100
+test_trigger_size: 50
+test_trigger_insert: patch
+test_attack_algorithm: sslbkd
+return_attack_target: False
+
+attack_target_word: n01558993
+trigger_insert: patch
+trigger_size: 50
