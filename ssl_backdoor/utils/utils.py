@@ -141,3 +141,28 @@ def knn_evaluate(model, train_loader, test_loader, device):
     all_preds = torch.cat(all_preds, dim=0)
     all_targets_list = torch.cat(all_targets_list, dim=0)
     return accuracy, all_preds, all_targets_list
+
+
+def extract_config_by_prefix(config_dict, prefix):
+    """
+    从配置字典中提取特定前缀的键值对
+    
+    Args:
+        config_dict (dict): 配置字典
+        prefix (str): 键前缀
+        
+    Returns:
+        dict: 包含所有以指定前缀开头的键值对的字典
+    """
+    # 如果前缀恰好是字典中的一个键，并且对应值是字典，则直接返回该子字典
+    if prefix in config_dict and isinstance(config_dict[prefix], dict):
+        return config_dict[prefix]
+    
+    # 否则，查找所有以该前缀开头的键
+    result = {}
+    for key, value in config_dict.items():
+        if key.startswith(f"{prefix}"):
+            key = key[len(prefix):]
+            result[key] = value
+    
+    return result

@@ -159,3 +159,37 @@ class AdaptivePoisoningAgent():
         adv = (adv * 255).clip(0, 255).astype(np.uint8)
         adv = Image.fromarray(adv)
         return adv
+    
+
+class BadEncoderPoisoningAgent:
+    def __init__(self, args):
+        self.args = args
+
+        trigger_data = np.load(args.trigger_file)
+        self.trigger, self.trigger_mask = trigger_data['t'], trigger_data['tm'] # shape为 (1, 32, 32, 3)
+        self.trigger, self.trigger_mask = self.trigger.squeeze(), self.trigger_mask.squeeze()
+        assert self.trigger.ndim == 3 or self.trigger.ndim == 4 and self.trigger_mask.shape[0] > 1
+
+
+    def apply_poison(self, img: Image.Image) -> Image.Image:
+        # 检查输入图像尺寸是否与 trigger 一致，不一致则 resize
+        trigger_shape = self.trigger.shape
+        if isinstance(img, Image.Image):
+            if img.size != (trigger_shape[1], trigger_shape[0]):
+                img = img.resize((trigger_shape[1], trigger_shape[0]), Image.BILINEAR)
+            img = np.array(img)
+        elif isinstance(img, np.ndarray):
+            if img.shape[0] != trigger_shape[0] or img.shape[1] != trigger_shape[1]:
+                img = Image.fromarray(img)
+                img = img.resize((trigger_shape[1], trigger_shape[0]), Image.BILINEAR)
+                img = np.array(img)
+        else:
+            raise ValueError("img must be an instance of Image.Image or np.ndarray")
+
+        assert img.shape[-1] == 3 or img.shape[-1] == 4, "img must be a 3 or 4 channel image"
+
+        backdoored_img = img * self.trigger_mask + self.trigger
+        backdoored_img = backdoored_img.astype(np.uint8)
+        backdoored_img = Image.fromarray(backdoored_img)
+
+        return backdoored_img

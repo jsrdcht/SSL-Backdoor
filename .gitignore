@@ -33,5 +33,13 @@ scripts_old/
 
 ssl_backdoor/datasets/hidden.py
 ssl_backdoor/datasets/dataset_old.py
+ssl_backdoor/attacks/drupe/
 ssl_backdoor/defenses/hidden/
 ssl_backdoor/defenses/patchsearch/PatchSearch/
+ssl_backdoor/defenses/dede/DeDe/
+
+# trash
+.trash/
+__pycache__/
+**/__pycache__/
+.hypothesis/

@@ -2,6 +2,7 @@ attack_algorithm: sslbkd
 data: data/ImageNet-100/trainset.txt
 dataset: imagenet100
 save_poisons: True
+# poisons_saved_path: /workspace/SSL-Backdoor/results/test/simsiam_imagenet-100_test/poisons
 
 keep_poison_class: False
 attack_target_list:
@@ -23,8 +24,8 @@ test_dataset: imagenet100
 test_trigger_size: 50
 test_trigger_insert: patch
 test_attack_algorithm: sslbkd
-return_attack_target: False
 
+return_attack_target: False
 attack_target_word: n01558993
 trigger_insert: patch
 trigger_size: 50
