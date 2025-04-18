@@ -8,6 +8,6 @@ export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
 # 现在可以执行 Python 脚本了，它能找到 ssl_trainers
 # 假设你的 python 命令是这样调用的
-CUDA_VISIBLE_DEVICES=3,4 python "${SCRIPT_DIR}/ddp_training.py" \
+CUDA_VISIBLE_DEVICES=5,7 python "${SCRIPT_DIR}/ddp_training.py" \
     --config configs/ssl/simsiam.py \
-    --attack_config configs/poisoning/poisoning_based/sslbkd.yaml
+    --attack_config /workspace/SSL-Backdoor/configs/poisoning/poisoning_based_copy/na_cifar10.yaml

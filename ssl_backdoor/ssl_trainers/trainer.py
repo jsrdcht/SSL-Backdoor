@@ -28,6 +28,7 @@ import ssl_backdoor.ssl_trainers.moco.loader
 import ssl_backdoor.ssl_trainers.moco.builder
 import ssl_backdoor.ssl_trainers.simsiam.builder
 import ssl_backdoor.ssl_trainers.byol.builder
+import ssl_backdoor.ssl_trainers.simclr.builder
 import ssl_backdoor.ssl_trainers.utils as utils
 import ssl_backdoor.datasets.dataset
 
@@ -173,6 +174,12 @@ def main_worker(index, args):
             proj_dim=getattr(args, 'proj_dim', None),
             pred_dim=getattr(args, 'pred_dim', None),
             tau=getattr(args, 'byol_tau', 0.99),
+            dataset=args.dataset)
+    elif args.method == 'simclr':
+        model = ssl_backdoor.ssl_trainers.simclr.builder.SimCLR(
+            models.__dict__[args.arch], 
+            dim=args.feature_dim, 
+            proj_dim=getattr(args, 'proj_dim', 128),
             dataset=args.dataset)
     else:
         raise ValueError(f"未知方法 '{args.method}'")
@@ -501,6 +508,7 @@ def create_data_loader(args):
 
     # 支持的数据集类
     dataset_classes = {
+        'bp': ssl_backdoor.datasets.dataset.BPTrainDataset,
         'corruptencoder': ssl_backdoor.datasets.dataset.CorruptEncoderTrainDataset,
         'sslbkd': ssl_backdoor.datasets.dataset.SSLBackdoorTrainDataset,
         'ctrl': ssl_backdoor.datasets.dataset.CTRLTrainDataset,

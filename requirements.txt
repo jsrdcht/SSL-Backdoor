@@ -10,3 +10,6 @@ pandas==1.4.4
 tqdm==4.65.0
 requests==2.28.2
 Pillow==9.4.0
+lightly==1.5.13
+opencv-python==4.8.1.78
+opencv-python-headless==4.9.0.80

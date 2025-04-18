@@ -73,65 +73,11 @@ def load_model_weights(model, wts_path: str) -> Dict[str, Any]:
     raise ValueError(f'无法在 {wts_path} 中找到模型权重')
 
 
-def get_backbone_model(arch, wts_path, device):
+def get_backbone_model(arch, wts_path, device, dataset='imagenet100'):
     """获取并加载预训练的主干网络。"""
-    if 'moco_' in arch:
-        arch = arch.replace('moco_', '')
-
-    if 'vit' in arch:
-        model = models_vit.__dict__[arch](num_classes=100, global_pool=True)
-        checkpoint_model = load_model_weights(model, wts_path)
-        
-        # 移除头部
-        for k in ['head.weight', 'head.bias']:
-            if k in checkpoint_model and checkpoint_model[k].shape != model.state_dict()[k].shape:
-                print(f"移除预训练检查点中的键 {k}")
-                del checkpoint_model[k]
-
-        # 插值位置嵌入
-        interpolate_pos_embed(model, checkpoint_model)
-        model.load_state_dict(checkpoint_model, strict=False)
-
-    else:
-        model = models.__dict__[arch]()
-        
-        if hasattr(model, 'fc'):  model.fc = nn.Sequential()
-        if hasattr(model, 'head'):  model.head = nn.Sequential()
-
-        state_dict = load_model_weights(model, wts_path)
-        
-        def is_valid_model_param_key(key):
-            valid_keys = ['encoder_q', 'backbone', 'encoder', 'model']
-            invalid_keys = ['fc', 'head', 'predictor', 'projector', 'projection', 
-                          'encoder_k', 'model_t', 'momentum']
-                
-            if any([k in key for k in invalid_keys]):
-                return False
-            if not any([k in key for k in valid_keys]):
-                return False
-            return True
-        
-        def model_param_key_filter(key):
-            if 'model.' in key:
-                key = key.replace('model.', '')
-            if 'module.' in key:
-                key = key.replace('module.', '')
-            if 'encoder.' in key:
-                key = key.replace('encoder.', '')
-            if 'encoder_q.' in key:
-                key = key.replace('encoder_q.', '')
-            if 'backbone.' in key:
-                key = key.replace('backbone.', '')
-            return key
-           
-        state_dict = {model_param_key_filter(k): v for k, v in state_dict.items() if is_valid_model_param_key(k)}
-        model.load_state_dict(state_dict, strict=True)
-
-    model = model.to(device)
-    for p in model.parameters():
-        p.requires_grad = False
+    from ssl_backdoor.utils.model_utils import get_backbone_model
     
-    return model
+    return get_backbone_model(arch, wts_path, device, dataset)
 
 
 def get_transforms(dataset_name):
@@ -738,7 +684,7 @@ def test_model(model_path, epoch, args, logger=None, config=None):
     train_val_loader, val_loader, val_poisoned_loader = get_dataloaders(args_obj, val_transform)
     
     # 加载主干网络
-    backbone = get_backbone_model(args_obj.arch, model_path, device)
+    backbone = get_backbone_model(args_obj.arch, model_path, device, args_obj.dataset)
     # 不要对没有需要梯度的backbone使用DDP
     if args.distributed:
         # 检查模型是否有需要梯度的参数
@@ -917,6 +863,7 @@ def test_model(model_path, epoch, args, logger=None, config=None):
                     # 创建PIL图像对象
                     clean_img = Image.open(clean_buf)
                     plt.close()
+                    plt.clf()  # <---- 添加: 显式清除图形状态
                     
                     # 记录毒化数据集的混淆矩阵
                     plt.figure(figsize=(fig_size, fig_size), dpi=dpi)
@@ -946,7 +893,7 @@ def test_model(model_path, epoch, args, logger=None, config=None):
                     poison_np_img = np.array(poison_img)
                     
                     # 使用Logger类的标准接口添加图像
-                    logger.add_image('eval/clean_confusion_matrix', clean_np_img, epoch)
+                    logger.add_image('eval/clean_confusion_matrix', clean_np_img, epoch) # TODO: 目前的图像上传没有进度记录，只有一个最新的图像
                     logger.add_image('eval/poison_confusion_matrix', poison_np_img, epoch)
                     
                     # 对于wandb，额外添加表格格式的混淆矩阵（这是wandb特有的功能）
@@ -957,14 +904,20 @@ def test_model(model_path, epoch, args, logger=None, config=None):
                             columns=["True/Pred"] + class_names,
                             data=[[class_names[i]] + [float(x) for x in clean_conf_matrix[i].tolist()] for i in range(len(class_names))]
                         )
+                        # <---- 添加: 调试打印
+                        print(f"DEBUG [rank {args.rank}]: Data for poison_table before creation:\n{np.array2string(poison_conf_matrix, precision=0)}")
                         poison_table = wandb.Table(
                             columns=["True/Pred"] + class_names,
                             data=[[class_names[i]] + [float(x) for x in poison_conf_matrix[i].tolist()] for i in range(len(class_names))]
                         )
-                        
-                        # 仅记录表格（图像已通过add_image记录）
+
+                        # <---- 修改: 分开记录表格
+                        # 记录干净表格
                         logger.log({
                             "eval/clean_confusion_matrix_table": clean_table,
+                        }, step=epoch)
+                        # 记录毒化表格
+                        logger.log({
                             "eval/poison_confusion_matrix_table": poison_table
                         }, step=epoch)
                     

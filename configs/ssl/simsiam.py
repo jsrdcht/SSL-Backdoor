@@ -17,7 +17,7 @@ config = {
     'lr_schedule': 'cos',
     'print_freq': 10,
     'resume': '',
-    'dist_url': 'tcp://localhost:10011',
+    'dist_url': 'tcp://localhost:10015',
     'dist_backend': 'nccl',
     'seed': None,
     'multiprocessing_distributed': True,
@@ -36,14 +36,11 @@ config = {
     'amp': True,
 
     # 实验记录
-    'experiment_id': 'simsiam_imagenet-100_test', # 更新实验ID
+    'experiment_id': 'simsiam_cifar10_test', # 更新实验ID
     'save_folder_root': '/workspace/SSL-Backdoor/results/test',
     'save_freq': 30,
     'eval_frequency': 30,
     
     # 日志配置
     'logger_type': 'wandb',  # 'tensorboard', 'wandb', 'none'
-
-    # 攻击目标类别（如果需要）
-    'attack_target_list': [0]
 } 

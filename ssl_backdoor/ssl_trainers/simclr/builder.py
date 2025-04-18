@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ssl_backdoor.ssl_trainers.utils import transform_encoder_for_small_dataset, remove_task_head_for_encoder
+from ssl_backdoor.utils.model_utils import transform_encoder_for_small_dataset, remove_task_head_for_encoder
 from lightly.models.modules import SimCLRProjectionHead
 from lightly.loss import NTXentLoss
 

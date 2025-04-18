@@ -345,15 +345,31 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
 
         self.args = args
         self.transform = transform
-        self.trigger_size = self.args.trigger_size
-        self.trigger_path = self.args.trigger_path
-        if not attr_exists(args, 'trigger_insert'):
-            self.trigger_insert = 'patch'
-        else:
-            self.trigger_insert = self.args.trigger_insert
-
         self.return_attack_target = getattr(self.args, 'return_attack_target', False)
         self.attack_target = self.args.attack_target
+
+        # 如果使用 CTRL 攻击算法，初始化对应的代理
+        if self.args.attack_algorithm == 'ctrl':
+            self.agent = CTRLPoisoningAgent(self.args)
+        elif self.args.attack_algorithm == 'blto':
+            args = copy.deepcopy(self.args)
+            args.device = 'cpu'
+            self.agent = AdaptivePoisoningAgent(args)
+        elif self.args.attack_algorithm == 'badencoder':
+            from .agent import BadEncoderPoisoningAgent
+            self.agent = BadEncoderPoisoningAgent(args)
+        else:
+            print(f"Unknown attack algorithm for OnlineUniversalPoisonedValDataset: {self.args.attack_algorithm}")
+
+            self.trigger_size = self.args.trigger_size
+            self.trigger_path = self.args.trigger_path
+            if not attr_exists(args, 'trigger_insert'):
+                self.trigger_insert = 'patch'
+            else:
+                self.trigger_insert = self.args.trigger_insert
+
+
+        
 
         # 初始化投毒样本索引
         self.poison_idxs = self.get_poisons_idxs()
@@ -363,23 +379,14 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         if self.pre_inject_mode:
             self.inject_trigger_to_all_samples()
 
-        # 如果使用 CTRL 攻击算法，初始化对应的代理
-        if self.args.attack_algorithm == 'ctrl':
-            self.ctrl_agent = CTRLPoisoningAgent(self.args)
-        elif self.args.attack_algorithm == 'blto':
-            args = copy.deepcopy(self.args)
-            args.device = 'cpu'
-            self.adaptive_agent = AdaptivePoisoningAgent(args)
 
     def get_poisons_idxs(self):
         return list(range(len(self.file_list)))
 
     def apply_poison(self, img):
         """对图像进行投毒处理"""
-        if self.args.attack_algorithm == 'ctrl':
-            return self.ctrl_agent.apply_poison(img)
-        elif self.args.attack_algorithm == 'blto':
-            return self.adaptive_agent.apply_poison(img)
+        if hasattr(self, 'agent'):
+            return self.agent.apply_poison(img)
         elif self.args.attack_algorithm == 'optimized':
             if not hasattr(self, 'delta_np'):
                 ckpt_state = torch.load(self.args.trigger_path, map_location="cpu")

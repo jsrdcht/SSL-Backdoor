@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from lightly.models.modules.heads import MoCoProjectionHead
-from ssl_backdoor.ssl_trainers.utils import remove_task_head_for_encoder, transform_encoder_for_small_dataset
+from ssl_backdoor.utils.model_utils import remove_task_head_for_encoder, transform_encoder_for_small_dataset
 
 # def find_last_linear_layer(module: nn.Module) -> typing.Optional[nn.Linear]:
 #     """Recursively find the last nn.Linear layer in a Sequential module."""
