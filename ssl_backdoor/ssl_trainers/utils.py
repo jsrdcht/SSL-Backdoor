@@ -288,30 +288,3 @@ def adjust_learning_rate(optimizer, epoch, args):
     """已弃用：此函数已被torch的学习率调度器替代。保留此函数仅为兼容性。"""
     # 调度器现在在main_worker中创建并直接应用
     pass
-
-
-def transform_encoder_for_small_dataset(model: nn.Module, dataset: str):
-    assert dataset in ['cifar10', 'cifar100', 'imagenet100', 'imagenet-1k', 'stl10']
-
-    # 判断是不是resnet
-    if not 'resnet' in model.__class__.__name__.lower():
-        print(f"encoder 不是resnet，不进行适应小数据集的转换")
-        return model
-    
-    if 'cifar10' in dataset or 'cifar100' in dataset:
-        model.maxpool = nn.Identity()
-    if 'imagenet' not in dataset:
-        model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-
-    return model
-
-
-def remove_task_head_for_encoder(model: nn.Module):
-    if hasattr(model, 'fc'):
-        model.fc = nn.Identity()
-    elif hasattr(model, 'head'):
-        model.head = nn.Identity()
-    else:
-        raise ValueError(f"model 没有fc或head属性")
-    
-    return model

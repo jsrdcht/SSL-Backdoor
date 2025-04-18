@@ -10,6 +10,7 @@ import numpy as np
 import torch
 
 from .core import patchsearch_iterative
+from .poison_classifier import run_poison_classifier
 from .utils.dataset import FileListDataset, get_transforms
 from ssl_backdoor.utils.model_utils import get_backbone_model
 
@@ -176,3 +177,93 @@ def run_patchsearch(
     np.save(os.path.join(experiment_dir, 'sorted_indices.npy'), sorted_inds)
     
     return result_dict 
+
+
+def run_patchsearch_filter(
+    poison_scores=None,
+    poison_scores_path=None,
+    output_dir=None,
+    train_file=None,
+    poison_dir=None,
+    dataset_name='imagenet100',
+    topk_poisons=20,
+    top_p=0.10,
+    model_count=3,
+    max_iterations=2000,
+    batch_size=128,
+    num_workers=8,
+    lr=0.01,
+    momentum=0.9,
+    weight_decay=1e-4,
+    print_freq=10,
+    eval_freq=50,
+    seed=42
+):
+    """
+    运行PatchSearch的第二阶段：训练一个分类器来过滤可能的后门样本
+    
+    参数:
+        poison_scores: 毒性分数数组，如果为None，则从poison_scores_path加载
+        poison_scores_path: 毒性分数文件路径
+        output_dir: 输出目录，如果为None，则使用poison_scores_path的目录
+        train_file: 训练文件路径
+        poison_dir: 包含顶部毒药补丁的目录，如果为None，则使用output_dir/all_top_poison_patches
+        dataset_name: 数据集名称
+        topk_poisons: 用于训练分类器的顶部毒药数量
+        top_p: 用于训练的数据百分比
+        model_count: 集成模型的数量
+        max_iterations: 最大迭代次数
+        batch_size: 批处理大小
+        num_workers: 工作进程数量
+        lr: 学习率
+        momentum: 动量
+        weight_decay: 权重衰减
+        print_freq: 打印频率
+        eval_freq: 评估频率
+        seed: 随机种子
+        
+    返回:
+        filtered_file_path: 过滤后的干净数据集文件路径
+    """
+    # 参数验证
+    if poison_scores is None and poison_scores_path is None:
+        raise ValueError("必须提供poison_scores或poison_scores_path之一")
+    
+    if poison_scores is None:
+        print(f"从文件加载毒性分数: {poison_scores_path}")
+        poison_scores = np.load(poison_scores_path)
+    
+    if output_dir is None and poison_scores_path is not None:
+        output_dir = os.path.dirname(poison_scores_path)
+    
+    if poison_dir is None:
+        poison_dir = os.path.join(output_dir, 'all_top_poison_patches')
+    
+    if not os.path.exists(poison_dir):
+        raise ValueError(f"毒药补丁目录不存在: {poison_dir}")
+    
+    # 运行毒药分类器
+    print(f"开始运行PatchSearch毒药分类器...")
+    filtered_file_path = run_poison_classifier(
+        poison_scores=poison_scores,
+        output_dir=output_dir,
+        train_file=train_file,
+        poison_dir=poison_dir,
+        dataset_name=dataset_name,
+        topk_poisons=topk_poisons,
+        top_p=top_p,
+        model_count=model_count,
+        max_iterations=max_iterations,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        lr=lr,
+        momentum=momentum,
+        weight_decay=weight_decay,
+        print_freq=print_freq,
+        eval_freq=eval_freq,
+        seed=seed
+    )
+    
+    print(f"过滤后的数据集已保存到: {filtered_file_path}")
+    
+    return filtered_file_path 

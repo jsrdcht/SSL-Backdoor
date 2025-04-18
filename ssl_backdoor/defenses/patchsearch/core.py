@@ -105,14 +105,7 @@ def patchsearch_iterative(
     if topk_thresholds is None:
         topk_thresholds = [5, 10, 20, 50, 100, 500]
     
-    # 设置保存目录
-    dir_name = f'patch_search_iterative_search_test_images_size_{test_images_size}_window_w_{window_w}_repeat_patch_{repeat_patch}_prune_clusters_{prune_clusters}'
-    dir_name = f'{dir_name}_num_clusters_{num_clusters}'
-    if prune_clusters:
-        dir_name = f'{dir_name}_per_iteration_samples_{samples_per_iteration}_remove_{remove_per_iteration}'
-    
-    dir_name = dir_name.replace('.', 'x')
-    save_dir = os.path.join(save_dir, dir_name)
+    save_dir = save_dir
     os.makedirs(save_dir, exist_ok=True)
     
     # 设置日志器
