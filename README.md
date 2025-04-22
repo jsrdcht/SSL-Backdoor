@@ -27,7 +27,7 @@ This library originated as a rewrite of the SSLBKD implementation, ensuring **co
 
 ## 📢 What's New?
 
-✅ **2024-04-18 Update:**
+✅ **2025-04-18 Update:**
 
 * **PatchSearch defense is now implemented and available!**
 * **BadEncoder attack is now implemented and available!**
