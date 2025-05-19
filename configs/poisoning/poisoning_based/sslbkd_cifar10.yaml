@@ -20,14 +20,5 @@ trigger_insert: patch
 trigger_size: 8
 
 
-# testset parameters
-test_train_file: data/CIFAR10/10percent_trainset.txt
-test_val_file: data/CIFAR10/testset.txt
-test_attack_target: 0
-test_trigger_path: assets/triggers/trigger_14.png
-test_dataset: cifar10
-test_trigger_size: 8
-test_trigger_insert: patch
-test_attack_algorithm: sslbkd
-test_return_attack_target: False
+
 

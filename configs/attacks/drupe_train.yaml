@@ -1,0 +1,19 @@
+# DRUPE训练配置文件
+image_size: 32
+shadow_dataset: cifar10
+shadow_file: data/CIFAR10/trainset.txt
+memory_file: data/CIFAR10/trainset.txt
+test_file: data/CIFAR10/testset.txt
+
+# 参考输入配置
+reference_file: assets/references/drupe_gtsrb_l12_n3/references.txt
+trigger_file: assets/triggers/white_10x10.png
+
+# 攻击参数
+shadow_fraction: 0.2
+trigger_size: 10
+mode: drupe  # 攻击模式: drupe, badencoder, wb
+n_ref: 3      # 参考输入数量
+
+# 模型相关参数
+encoder_usage_info: cifar10 

@@ -18,11 +18,11 @@ from torch.utils import data
 
 from .corruptencoder_utils import *
 from .agent import CTRLPoisoningAgent, AdaptivePoisoningAgent
-from .utils import concatenate_images, concatenate_images_with_gap, attr_exists, attr_is_true, load_image
+from .utils import concatenate_images, attr_exists, attr_is_true, load_image
 
 from .base import TriggerBasedPoisonedTrainDataset
 from .hidden import *
-
+from .var import dataset_params
 
     
 
@@ -347,6 +347,8 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         self.transform = transform
         self.return_attack_target = getattr(self.args, 'return_attack_target', False)
         self.attack_target = self.args.attack_target
+        self.img_size = dataset_params[self.args.dataset]['image_size']
+
 
         # 如果使用 CTRL 攻击算法，初始化对应的代理
         if self.args.attack_algorithm == 'ctrl':
@@ -355,21 +357,20 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
             args = copy.deepcopy(self.args)
             args.device = 'cpu'
             self.agent = AdaptivePoisoningAgent(args)
-        elif self.args.attack_algorithm == 'badencoder':
-            from .agent import BadEncoderPoisoningAgent
-            self.agent = BadEncoderPoisoningAgent(args)
+        elif self.args.attack_algorithm == 'badclip':
+            from .agent import BadCLIPPoisoningAgent
+            self.agent = BadCLIPPoisoningAgent(args)
         else:
-            print(f"Unknown attack algorithm for OnlineUniversalPoisonedValDataset: {self.args.attack_algorithm}")
+            print(f"No agent for OnlineUniversalPoisonedValDataset: {self.args.attack_algorithm}")
 
             self.trigger_size = self.args.trigger_size
             self.trigger_path = self.args.trigger_path
-            if not attr_exists(args, 'trigger_insert'):
-                self.trigger_insert = 'patch'
-            else:
-                self.trigger_insert = self.args.trigger_insert
+            self.location_min = getattr(self.args, 'location_min', 0.15)
+            self.location_max = getattr(self.args, 'location_max', 0.85)
+            self.trigger_insert = getattr(self.args, 'trigger_insert', 'patch')
+            self.position = getattr(self.args, 'position', 'random')
+            self.alpha = getattr(self.args, 'alpha', 0.0)
 
-
-        
 
         # 初始化投毒样本索引
         self.poison_idxs = self.get_poisons_idxs()
@@ -404,16 +405,30 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
             return poisoned_img
         elif self.args.attack_algorithm == 'clean':
             return img
+        elif self.args.attack_algorithm == 'badencoder':
+            img = img.resize((self.img_size, self.img_size), Image.BILINEAR)
+            return add_watermark(
+                    img,
+                    self.args.trigger_path,
+                    watermark_width=self.args.trigger_size,
+                    position=self.position,
+                    location_min=self.location_min,
+                    location_max=self.location_max,
+                    alpha_composite=True,
+                    alpha=self.alpha,
+                    return_location=False,
+                    mode=self.trigger_insert
+                )
         else:
             return add_watermark(
                     img,
                     self.args.trigger_path,
                     watermark_width=self.args.trigger_size,
-                    position='random',
-                    location_min=0.15,
-                    location_max=0.85,
+                    position=self.position,
+                    location_min=self.location_min,
+                    location_max=self.location_max,
                     alpha_composite=True,
-                    alpha=0.0,
+                    alpha=self.alpha,
                     return_location=False,
                     mode=self.trigger_insert
                 )
