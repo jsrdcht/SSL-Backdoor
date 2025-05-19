@@ -9,9 +9,9 @@ export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
 # 配置参数
 CONFIG_PATH="configs/attacks/badencoder.py"
-EXPERIMENT_ID="badencoder_cifar10_gtsrb"
+TEST_CONFIG_PATH="/workspace/SSL-Backdoor/configs/poisoning/poisoning_based/sslbkd_test.yaml"
 
 # 运行BadEncoder攻击
-CUDA_VISIBLE_DEVICES=5 python tools/run_badencoder.py \
+CUDA_VISIBLE_DEVICES=2 python tools/run_badencoder.py \
     --config $CONFIG_PATH \
-    --experiment_id $EXPERIMENT_ID 
+    --test_config $TEST_CONFIG_PATH

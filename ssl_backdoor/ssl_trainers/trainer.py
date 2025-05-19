@@ -42,7 +42,7 @@ from ssl_backdoor.ssl_trainers.utils import (
 )
 
 # 测试功能
-from tools.test import test_model
+# from tools.test import test_model  # <-- 删除这一行
 
 
 def get_trainer(config_or_path):
@@ -210,8 +210,8 @@ def main_worker(index, args):
         optim_params = model.parameters()
 
     # 根据模型架构选择优化器
-    if args.optimizer == 'adam':
-        optimizer = torch.optim.Adam(optim_params, lr=args.lr, weight_decay=args.weight_decay)
+    if args.optimizer == 'adamw':
+        optimizer = torch.optim.AdamW(optim_params, lr=args.lr, weight_decay=args.weight_decay)
     elif args.optimizer == 'sgd':
         optimizer = torch.optim.SGD(
             optim_params, args.lr,
@@ -291,12 +291,8 @@ def main_worker(index, args):
     train_loader = create_data_loader(args)
 
     # 检查是否启用评估
-    eval_params = ['test_train_file', 'test_val_file', 'test_trigger_path', 
-                  'test_trigger_size', 'test_trigger_insert', 'test_attack_target', 
-                  'test_dataset', 'test_attack_algorithm']
-    
-    has_eval_params = all(hasattr(args, param) for param in eval_params)
-    do_eval = has_eval_params and getattr(args, 'eval_enabled', False)
+    do_eval = hasattr(args, 'test_config') and isinstance(args.test_config, dict)
+
     
     if do_eval and args.rank == 0:
         print(f"模型评估已启用，评估频率：每 {args.eval_frequency} 个 epoch")
@@ -386,9 +382,13 @@ def main_worker(index, args):
                 dist.broadcast_object_list(object_list, src=0)
                 save_filename = object_list[0]
             
+            # --- 将导入移动到这里 ---
+            from tools.test import test_model
+            # ---------------------
+            
             # 执行评估
             print(f"rank {args.rank} 正在评估 epoch {epoch+1} 的模型...")
-            clean_acc, poison_acc, asr = test_model(save_filename, epoch + 1, args, logger)
+            clean_acc, poison_acc, asr = test_model(save_filename, epoch + 1, args, logger, config=(args.test_config if hasattr(args, 'test_config') else None))
             
             # 如果是临时评估检查点，测试完成后删除
             if (args.distributed and args.rank == 0) or (args.index == 0):
@@ -490,9 +490,13 @@ def create_data_loader(args):
     params = dataset_params[args.dataset]
     args.image_size = params['image_size']
 
+    # 获取最小crop比例，默认为0.2
+    min_scale = getattr(args, 'min_crop_scale', 0.2)
+    print(f"使用的RandomResizedCrop最小缩放比例: {min_scale}")
+
     # 定义数据增强
     augmentation = [
-        transforms.RandomResizedCrop(args.image_size, scale=(0.2, 1.)),
+        transforms.RandomResizedCrop(args.image_size, scale=(min_scale, 1.)),
         transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
         transforms.RandomGrayscale(p=0.2),
         transforms.RandomApply([ssl_backdoor.ssl_trainers.moco.loader.GaussianBlur([.1, 2.])], p=0.5),

@@ -21,8 +21,8 @@ simsiam_old/
 SSL-Cleanse/
 scripts_old/
 trash/
-projects/
-
+ssl_backdoor/projects/
+ssl_backdoor/defenses/projects/
 
 # Ignore private things
 configs/poisoning/ablation/**
@@ -30,6 +30,7 @@ configs/poisoning/poisoning_based_copy/**
 configs/poisoning/optimization_based/**
 projects/
 scripts_old/
+projects/
 
 ssl_backdoor/datasets/hidden.py
 ssl_backdoor/datasets/dataset_old.py
@@ -43,3 +44,13 @@ ssl_backdoor/defenses/dede/DeDe/
 __pycache__/
 **/__pycache__/
 .hypothesis/
+ssl_pretrain.py
+methods.py
+test.py
+assets/references/drupe_gtsrb_l12_n3
+assets/references/imagenet
+ssl_backdoor/attacks/badencoder/badencoder_vanilla.py
+ssl_backdoor/ssl_trainers/moco/moco_badencoder
+ssl_backdoor/ssl_trainers/moco/simsiam_badencoder
+ssl_backdoor/ssl_trainers/moco/main_moco\ copy.py
+ssl_backdoor/ssl_trainers/moco/main_moco_badencoder2.py

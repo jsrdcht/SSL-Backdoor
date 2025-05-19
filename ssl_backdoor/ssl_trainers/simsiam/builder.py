@@ -24,11 +24,17 @@ class SimSiam(nn.Module):
 
         # create the encoder
         # num_classes is the output fc dimension, zero-initialize last BNs
-        self.encoder = base_encoder(num_classes=dim, zero_init_residual=True)
-        channel_dim = SimSiam.get_channel_dim(self.encoder)
-        self.encoder = transform_encoder_for_small_dataset(self.encoder, dataset)
-        self.encoder = remove_task_head_for_encoder(self.encoder)
-
+        encoder_name = str(base_encoder).lower()
+        self.encoder = base_encoder(num_classes=dim)
+        
+        if "squeezenet" in encoder_name:
+            # 对于squeezenet，跳过特殊处理，直接使用dim作为channel_dim
+            channel_dim = dim
+        else:
+            # 对于其他网络，按原来的方式处理
+            channel_dim = SimSiam.get_channel_dim(self.encoder)
+            self.encoder = transform_encoder_for_small_dataset(self.encoder, dataset)
+            self.encoder = remove_task_head_for_encoder(self.encoder)
 
         self.projector = SimSiamProjectionHead(input_dim=channel_dim, hidden_dim=channel_dim, output_dim=dim)
         self.predictor = SimSiamPredictionHead(input_dim=dim, hidden_dim=pred_dim, output_dim=dim)
@@ -36,12 +42,34 @@ class SimSiam(nn.Module):
 
     @staticmethod
     def get_channel_dim(encoder: nn.Module) -> int:
+        def get_channel_dim_from_sequential(sequential: nn.Sequential) -> int:
+            for module in sequential:
+                if isinstance(module, nn.Linear):
+                    return module.in_features
+                elif isinstance(module, nn.Conv2d):
+                    return module.in_channels
+            raise ValueError("没有在Sequential中找到Linear层或Conv2d层")
+            
         if hasattr(encoder, 'fc'):
             return encoder.fc.weight.shape[1]
         elif hasattr(encoder, 'head'):
             return encoder.head.weight.shape[1]
+        elif hasattr(encoder, 'heads'):
+            # 处理Vision Transformer中的heads属性
+            if hasattr(encoder.heads, 'head'):
+                return encoder.heads.head.in_features
+            # 遍历Sequential中的层
+            if isinstance(encoder.heads, nn.Sequential):
+                for name, module in encoder.heads.named_children():
+                    if name == 'head' or name == 'pre_logits':
+                        return module.in_features
+                # 如果没有找到head或pre_logits，尝试获取第一个Linear层
+                return get_channel_dim_from_sequential(encoder.heads)
         elif hasattr(encoder, 'classifier'):
-            return encoder.classifier.weight.shape[1]
+            if isinstance(encoder.classifier, nn.Sequential):
+                return get_channel_dim_from_sequential(encoder.classifier)
+            else:
+                return encoder.classifier.weight.shape[1]
         else:
             raise NotImplementedError('MLP projection head not found in encoder')
         

@@ -19,11 +19,10 @@ from torchvision import datasets, transforms
 from ssl_backdoor.datasets.dataset import FileListDataset
 from ssl_backdoor.datasets import dataset_params
 from ssl_backdoor.datasets.agent import BadEncoderPoisoningAgent
+from ssl_backdoor.datasets.utils import add_watermark
 
 
-
-
-class BadEncoderDataset(Dataset):
+class VanillaBadEncoderDataset(Dataset):
     """
     BadEncoder数据集，包含干净图像、后门图像、参考图像及其增强版本
     """
@@ -43,8 +42,9 @@ class BadEncoderDataset(Dataset):
         self.transform = transforms.Compose([
             transforms.Resize((args.image_size, args.image_size)),
             transforms.ToTensor(),
-            getattr(dataset_params[args.shadow_dataset], 'normalize', lambda x: x)
+            dataset_params[args.shadow_dataset]['normalize']
         ])
+        
         # 随机增强
         self.transform_aug = transforms.Compose([
             transforms.RandomResizedCrop(args.image_size, scale=(0.2, 1.0)),
@@ -54,7 +54,7 @@ class BadEncoderDataset(Dataset):
             ], p=0.8),
             transforms.RandomGrayscale(p=0.2),
             transforms.ToTensor(),
-            getattr(dataset_params[args.shadow_dataset], 'normalize', lambda x: x)
+            dataset_params[args.shadow_dataset]['normalize']
         ])
 
         self.poisoning_agent = BadEncoderPoisoningAgent(args)
@@ -134,6 +134,121 @@ class BadEncoderDataset(Dataset):
         return reference_img_list
 
 
+class BadEncoderDataset(VanillaBadEncoderDataset):
+    """
+    BadEncoder数据集的改进版本，参考输入使用FileListDataset加载
+    """
+    def __init__(self, args, shadow_file: str = None, reference_file: str = None, trigger_file: str = None):
+        """
+        初始化改进版BadEncoder数据集
+        
+        Args:
+            args: 配置参数
+            shadow_file: shadow data 文件路径，用于粘贴触发器后成为对齐的源数据
+            reference_file: 参考输入文件路径，包含图像文件路径列表
+            trigger_file: 触发器image 路径
+        """
+        self.args = args
+        # 设置数据增强
+        # 基础增强
+        self.transform = transforms.Compose([
+            transforms.Resize((args.image_size, args.image_size)),
+            transforms.ToTensor(),
+            dataset_params[args.shadow_dataset]['normalize']
+        ])
+        # 随机增强
+        self.transform_aug = transforms.Compose([
+            transforms.RandomResizedCrop(args.image_size, scale=(0.2, 1.0)),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomApply([
+                transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)
+            ], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.ToTensor(),
+            dataset_params[args.shadow_dataset]['normalize']
+        ])
+
+        # self.poisoning_agent = BadEncoderPoisoningAgent(args)
+        # 加载干净数据集
+        self.clean_dataset = FileListDataset(args, shadow_file, transform=None)
+        self.clean_dataset.file_list = random.sample(self.clean_dataset.file_list, int(len(self.clean_dataset.file_list) * args.shadow_fraction))
+        
+        # 使用FileListDataset加载参考输入
+        if reference_file:
+            print(f"加载参考输入: {reference_file}")
+            self.reference_dataset = FileListDataset(args, reference_file, transform=None)
+            self.reference_dataset.file_list = random.sample(self.reference_dataset.file_list, self.args.n_ref)
+        else:
+            raise ValueError("必须提供参考输入文件")
+            
+        # 加载触发器
+        self.trigger_file = trigger_file
+        self.trigger_size = self.args.trigger_size
+
+    
+    def _prepare_reference_images(self, _=None) -> List[Image.Image]:
+        """重写参考图像准备方法，直接从FileListDataset加载"""
+        reference_img_list = []
+        
+        # 随机选择参考图像的索引
+        indices = np.random.randint(0, len(self.reference_dataset), size=self.args.n_ref)
+        for idx in indices:
+            reference_img, _ = self.reference_dataset[idx]
+            reference_img_list.append(reference_img)
+            
+        return reference_img_list
+    
+    def __getitem__(self, idx):
+        """获取一个数据样本"""
+        clean_img, _ = self.clean_dataset[idx]
+        
+        # 准备后门图像
+        # backdoored_img_list = [self._prepare_backdoor_images(clean_img) for _ in range(self.args.n_ref)]
+        _clean_img = clean_img.resize((self.args.image_size, self.args.image_size), Image.BILINEAR)
+        backdoored_img_list = [add_watermark(_clean_img, watermark = self.trigger_file, watermark_width=self.trigger_size, position='badencoder', mode='patch') for _ in range(self.args.n_ref)]
+        
+        # 准备参考图像及其增强版本
+        reference_img_list = self._prepare_reference_images()
+
+        if self.transform is not None:
+            clean_img_transformed = self.transform(clean_img)
+            backdoored_img_list_transformed = [self.transform(img) for img in backdoored_img_list]
+            reference_img_list_transformed = [self.transform(img) for img in reference_img_list]
+            if self.transform_aug is not None:
+                reference_aug_list_transformed = [self.transform_aug(img) for img in reference_img_list]
+            
+        return clean_img_transformed, backdoored_img_list_transformed, reference_img_list_transformed, reference_aug_list_transformed
+
+
+class BadEncoderDatasetAsOneBackdoorOutput(BadEncoderDataset):
+    """
+    BadEncoder数据集的简化版本，__getitem__方法只返回一个后门图像
+    用于对外提供简单的服务
+    """ 
+    def __getitem__(self, idx):
+        """
+        获取一个数据样本，只返回一个后门图像
+        
+        Args:
+            idx: 数据索引
+            
+        Returns:
+            backdoored_img: 单个后门图像
+        """
+        clean_img, _ = self.clean_dataset[idx]
+        
+        # 准备后门图像
+        _clean_img = clean_img.resize((self.args.image_size, self.args.image_size), Image.BILINEAR)
+        backdoored_img = add_watermark(_clean_img, watermark=self.trigger_file, 
+                                      watermark_width=self.trigger_size, position='badencoder', mode='patch')
+        
+        # 应用变换
+        if self.transform is not None:
+            backdoored_img = self.transform(backdoored_img)
+            
+        return backdoored_img
+
+
 
 
 def get_poisoning_dataset(args):
@@ -145,13 +260,11 @@ def get_poisoning_dataset(args):
     Returns:
         shadow_data: 用于训练BadEncoder的数据集
         memory_data: 内存数据集（用于评估）
-        test_data_clean: 干净测试数据集
-        test_data_backdoor: 后门测试数据集
     """
     transform = transforms.Compose([
         transforms.Resize((args.image_size, args.image_size)),
         transforms.ToTensor(),
-        getattr(dataset_params[args.shadow_dataset], 'normalize', lambda x: x)
+        dataset_params[args.shadow_dataset]['normalize']
     ])
     
     # 加载影子数据集
@@ -172,66 +285,5 @@ def get_poisoning_dataset(args):
     else:
         memory_data = None
     
-    # 加载测试数据集
-    test_data_clean = None
-    test_data_backdoor = None
     
-    if hasattr(args, 'test_clean_file') and args.test_clean_file:
-        test_data_clean = FileListDataset(
-            args=args,
-            path_to_txt_file=args.test_clean_file,
-            transform=transform
-        )
-        
-        # 创建后门测试数据集
-        from ssl_backdoor.datasets.dataset import OnlineUniversalPoisonedValDataset
-        test_data_backdoor = OnlineUniversalPoisonedValDataset(
-            args=args,
-            path_to_txt_file=args.test_clean_file,
-            transform=transform
-        )
-    
-    return shadow_data, memory_data, test_data_clean, test_data_backdoor
-
-
-def get_dataset_evaluation(args):
-    """获取用于评估的数据集
-    
-    Args:
-        args: 包含数据集配置的参数
-        
-    Returns:
-        downstream_train_dataset: 目标类数据集
-        train_data: 训练数据集
-        test_data_clean: 干净测试数据集
-        test_data_backdoor: 后门测试数据集
-    """
-    transform = transforms.Compose([
-        transforms.Resize((args.image_size, args.image_size)),
-        transforms.ToTensor(),
-        getattr(dataset_params[args.shadow_dataset], 'normalize', lambda x: x)
-    ])
-    
-    # 加载训练数据集
-    downstream_train_dataset = FileListDataset(
-        args=args,
-        path_to_txt_file=args.test_train_file,
-        transform=transform,
-    )
-    
-    # 加载测试数据集
-    test_data_clean = FileListDataset(
-        args=args,
-        path_to_txt_file=args.test_clean_file,
-        transform=transform
-    )
-    
-    # 创建后门测试数据集
-    from ssl_backdoor.datasets.dataset import OnlineUniversalPoisonedValDataset
-    test_data_backdoor = OnlineUniversalPoisonedValDataset(
-        args=args,
-        path_to_txt_file=args.test_clean_file,
-        transform=transform
-    )
-    
-    return downstream_train_dataset, test_data_clean, test_data_backdoor 
+    return shadow_data, memory_data
