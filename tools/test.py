@@ -23,7 +23,7 @@ import torchvision.models as models
 # 项目内部导入
 from tools.eval_utils import AverageMeter, ProgressMeter, accuracy, save_checkpoint
 from ssl_backdoor.datasets.dataset import FileListDataset, OnlineUniversalPoisonedValDataset
-from ssl_backdoor.utils.utils import interpolate_pos_embed, get_channels
+from ssl_backdoor.utils.utils import interpolate_pos_embed
 import ssl_backdoor.ssl_trainers.models_vit as models_vit
 
 
@@ -162,8 +162,8 @@ def get_dataloaders(args, val_transform):
     """
     # 创建数据集
     train_dataset = FileListDataset(args, args.train_file, val_transform)
-    val_dataset = FileListDataset(args, args.val_file, val_transform)
-    val_poisoned_dataset = OnlineUniversalPoisonedValDataset(args, args.val_file, val_transform)
+    val_dataset = FileListDataset(args, args.test_file, val_transform)
+    val_poisoned_dataset = OnlineUniversalPoisonedValDataset(args, args.test_file, val_transform)
     
     # 通用数据加载器参数
     loader_kwargs = {
@@ -240,11 +240,15 @@ def get_feats(loader, model):
             # 初始化特征和标签张量 (仅在第一次迭代时)
             if ptr == 0:
                 # 计算当前进程需要处理的样本数量
-                total_size = len(loader.dataset)
+                total_size = len(loader.dataset) # total_size is the size of the full dataset
                 if is_distributed:
-                    # 在分布式环境中，每个进程只处理数据集的一部分
-                    samples_per_rank = total_size // world_size + (1 if total_size % world_size > rank else 0)
+                    # 在分布式环境中，每个进程实际处理的样本数量由 DistributedSampler 决定
+                    # (当 drop_last=False 时，sampler会填充数据以使每个进程样本数大致相同)
+                    # loader.sampler 是 DistributedSampler 实例
+                    # DistributedSampler.num_samples 计算为 math.ceil(len(dataset) / num_replicas)
+                    samples_per_rank = loader.sampler.num_samples
                 else:
+                    # 非分布式情况下，处理整个数据集
                     samples_per_rank = total_size
                 
                 feats = torch.zeros((samples_per_rank, D)).float()
@@ -611,21 +615,18 @@ def test_model(model_path, epoch, args, logger=None, config=None):
         
     # 解析参数
     def _get_param(name, default=None):
-        # 按优先级顺序：1) test_前缀参数 2) 直接参数 3) config中的参数 4) 默认值
-        test_name = f"test_{name}"
-        if hasattr(args, test_name):
-            return getattr(args, test_name)
+        # 优先使用外部传入的 config（如 test_config）中的参数
+        if config and name in config and config[name] is not None:
+            return config[name]
         elif hasattr(args, name):
             return getattr(args, name)
-        elif config and name in config:
-            return config[name]
         return default
     
     # 初始化评估参数
     eval_args = {
         # 必要参数
         'train_file': _get_param('train_file'),
-        'val_file': _get_param('val_file'),
+        'test_file': _get_param('test_file'),
         'dataset': _get_param('dataset'),
         'attack_target': _get_param('attack_target'),
         'trigger_path': _get_param('trigger_path'),
@@ -652,7 +653,7 @@ def test_model(model_path, epoch, args, logger=None, config=None):
     }
     
     # 验证必要参数
-    required_params = ['train_file', 'val_file', 'dataset', 'attack_target', 
+    required_params = ['train_file', 'test_file', 'dataset', 'attack_target', 
                       'trigger_path', 'trigger_insert', 'attack_algorithm']
     missing = [p for p in required_params if eval_args[p] is None]
     if missing:
@@ -710,7 +711,7 @@ def test_model(model_path, epoch, args, logger=None, config=None):
     linear = nn.Sequential(
         Normalize(),
         FullBatchNorm(train_var, train_mean),
-        nn.Linear(get_channels(arch), nb_classes),
+        nn.Linear(train_feats.shape[1], nb_classes),
     ).to(device)
     
     # 同步所有进程，确保所有进程都创建了线性分类器
@@ -818,119 +819,115 @@ def test_model(model_path, epoch, args, logger=None, config=None):
         print(f"Poison Confusion Matrix:\n{np.array2string(poison_conf_matrix, precision=0)}")
 
         if logger:
-            if hasattr(logger, 'log'):
-                # 记录基本指标
-                logger.log({
-                    "eval/clean_acc": clean_acc,
-                    "eval/poison_acc": poison_acc,
-                    "eval/attack_success_rate": asr
-                }, step=epoch)
+            # 记录基本指标
+            logger.log({
+                "eval/clean_acc": clean_acc,
+                "eval/poison_acc": poison_acc,
+                "eval/attack_success_rate": asr
+            }, step=epoch)
+            
+            # 创建混淆矩阵的可视化并记录
+            try:
+                import matplotlib.pyplot as plt
+                import io
+                from PIL import Image
                 
-                # 创建混淆矩阵的可视化并记录
-                try:
-                    import matplotlib.pyplot as plt
-                    import io
-                    from PIL import Image
-                    
-                    # 准备类别名称
-                    class_names = [str(i) for i in range(clean_conf_matrix.shape[0])]
-                    num_classes = clean_conf_matrix.shape[0]
-                    
-                    # 根据类别数量动态调整图片大小和DPI
-                    fig_size = max(10, num_classes * 0.5)  # 随类别数增加而增加
-                    dpi = max(100, min(300, 100 + num_classes * 2))  # 提高DPI但设置上限
-                    
-                    # 记录干净数据集的混淆矩阵
-                    plt.figure(figsize=(fig_size, fig_size), dpi=dpi)
-                    plt.imshow(clean_conf_matrix, cmap='Blues')
-                    plt.colorbar()
-                    plt.xlabel('Predicted')
-                    plt.ylabel('True')
-                    plt.title(f'Clean Confusion Matrix (Epoch {epoch})')
-                    # 如果类别较多，可能需要调整标签字体大小
-                    if num_classes > 20:
-                        plt.xticks(fontsize=8)
-                        plt.yticks(fontsize=8)
-                    if num_classes <= 30:  # 类别不太多时显示刻度
-                        plt.xticks(range(num_classes), class_names)
-                        plt.yticks(range(num_classes), class_names)
-                    
-                    # 将图像保存到内存缓冲区
-                    clean_buf = io.BytesIO()
-                    plt.savefig(clean_buf, format='png', bbox_inches='tight')
-                    clean_buf.seek(0)
-                    
-                    # 创建PIL图像对象
-                    clean_img = Image.open(clean_buf)
-                    plt.close()
-                    plt.clf()  # <---- 添加: 显式清除图形状态
-                    
-                    # 记录毒化数据集的混淆矩阵
-                    plt.figure(figsize=(fig_size, fig_size), dpi=dpi)
-                    plt.imshow(poison_conf_matrix, cmap='Reds')
-                    plt.colorbar()
-                    plt.xlabel('Predicted')
-                    plt.ylabel('True')
-                    plt.title(f'Poison Confusion Matrix (Epoch {epoch})')
-                    if num_classes > 20:
-                        plt.xticks(fontsize=8)
-                        plt.yticks(fontsize=8)
-                    if num_classes <= 30:  # 类别不太多时显示刻度
-                        plt.xticks(range(num_classes), class_names)
-                        plt.yticks(range(num_classes), class_names)
-                    
-                    # 将图像保存到内存缓冲区
-                    poison_buf = io.BytesIO()
-                    plt.savefig(poison_buf, format='png', bbox_inches='tight')
-                    poison_buf.seek(0)
-                    
-                    # 创建PIL图像对象
-                    poison_img = Image.open(poison_buf)
-                    plt.close()
-                    
-                    # 将PIL图像转为numpy数组以便统一处理
-                    clean_np_img = np.array(clean_img)
-                    poison_np_img = np.array(poison_img)
-                    
-                    # 使用Logger类的标准接口添加图像
-                    logger.add_image('eval/clean_confusion_matrix', clean_np_img, epoch) # TODO: 目前的图像上传没有进度记录，只有一个最新的图像
+                # 准备类别名称
+                class_names = [str(i) for i in range(clean_conf_matrix.shape[0])]
+                num_classes = clean_conf_matrix.shape[0]
+                
+                # 根据类别数量动态调整图片大小和DPI
+                fig_size = max(10, num_classes * 0.5)  # 随类别数增加而增加
+                dpi = max(100, min(300, 100 + num_classes * 2))  # 提高DPI但设置上限
+                
+                # 记录干净数据集的混淆矩阵
+                plt.figure(figsize=(fig_size, fig_size), dpi=dpi)
+                plt.imshow(clean_conf_matrix, cmap='Blues')
+                plt.colorbar()
+                plt.xlabel('Predicted')
+                plt.ylabel('True')
+                plt.title(f'Clean Confusion Matrix (Epoch {epoch})')
+                # 如果类别较多，可能需要调整标签字体大小
+                if num_classes > 20:
+                    plt.xticks(fontsize=8)
+                    plt.yticks(fontsize=8)
+                if num_classes <= 30:  # 类别不太多时显示刻度
+                    plt.xticks(range(num_classes), class_names)
+                    plt.yticks(range(num_classes), class_names)
+                
+                # 将图像保存到内存缓冲区
+                clean_buf = io.BytesIO()
+                plt.savefig(clean_buf, format='png', bbox_inches='tight')
+                clean_buf.seek(0)
+                
+                # 创建PIL图像对象
+                clean_img = Image.open(clean_buf)
+                plt.close()
+                plt.clf()  # <---- 添加: 显式清除图形状态
+                
+                # 记录毒化数据集的混淆矩阵
+                plt.figure(figsize=(fig_size, fig_size), dpi=dpi)
+                plt.imshow(poison_conf_matrix, cmap='Reds')
+                plt.colorbar()
+                plt.xlabel('Predicted')
+                plt.ylabel('True')
+                plt.title(f'Poison Confusion Matrix (Epoch {epoch})')
+                if num_classes > 20:
+                    plt.xticks(fontsize=8)
+                    plt.yticks(fontsize=8)
+                if num_classes <= 30:  # 类别不太多时显示刻度
+                    plt.xticks(range(num_classes), class_names)
+                    plt.yticks(range(num_classes), class_names)
+                
+                # 将图像保存到内存缓冲区
+                poison_buf = io.BytesIO()
+                plt.savefig(poison_buf, format='png', bbox_inches='tight')
+                poison_buf.seek(0)
+                
+                # 创建PIL图像对象
+                poison_img = Image.open(poison_buf)
+                plt.close()
+                
+                # 将PIL图像转为numpy数组以便统一处理
+                clean_np_img = np.array(clean_img)
+                poison_np_img = np.array(poison_img)
+                
+                # 使用Logger类的标准接口添加图像
+                if hasattr(logger, 'add_image'):
+                    logger.add_image('eval/clean_confusion_matrix', clean_np_img, epoch)
                     logger.add_image('eval/poison_confusion_matrix', poison_np_img, epoch)
-                    
-                    # 对于wandb，额外添加表格格式的混淆矩阵（这是wandb特有的功能）
-                    if logger.log_type == 'wandb':
-                        import wandb
-                        # 使用wandb原生表格格式记录混淆矩阵
-                        clean_table = wandb.Table(
-                            columns=["True/Pred"] + class_names,
-                            data=[[class_names[i]] + [float(x) for x in clean_conf_matrix[i].tolist()] for i in range(len(class_names))]
-                        )
-                        # <---- 添加: 调试打印
-                        print(f"DEBUG [rank {args.rank}]: Data for poison_table before creation:\n{np.array2string(poison_conf_matrix, precision=0)}")
-                        poison_table = wandb.Table(
-                            columns=["True/Pred"] + class_names,
-                            data=[[class_names[i]] + [float(x) for x in poison_conf_matrix[i].tolist()] for i in range(len(class_names))]
-                        )
+                
+                # 对于wandb，额外添加表格格式的混淆矩阵（这是wandb特有的功能）
+                if logger.log_type == 'wandb':
+                    import wandb
+                    # 使用wandb原生表格格式记录混淆矩阵
+                    clean_table = wandb.Table(
+                        columns=["True/Pred"] + class_names,
+                        data=[[class_names[i]] + [float(x) for x in clean_conf_matrix[i].tolist()] for i in range(len(class_names))]
+                    )
+                    # <---- 添加: 调试打印
+                    print(f"DEBUG [rank {args.rank}]: Data for poison_table before creation:\n{np.array2string(poison_conf_matrix, precision=0)}")
+                    poison_table = wandb.Table(
+                        columns=["True/Pred"] + class_names,
+                        data=[[class_names[i]] + [float(x) for x in poison_conf_matrix[i].tolist()] for i in range(len(class_names))]
+                    )
 
-                        # <---- 修改: 分开记录表格
-                        # 记录干净表格
-                        logger.log({
-                            "eval/clean_confusion_matrix_table": clean_table,
-                        }, step=epoch)
-                        # 记录毒化表格
-                        logger.log({
-                            "eval/poison_confusion_matrix_table": poison_table
-                        }, step=epoch)
-                    
-                    # 对于tensorboard，额外记录混淆矩阵数据为文本
-                    elif logger.log_type == 'tensorboard':
-                        # 由于TensorBoard不支持表格，可以将混淆矩阵作为文本记录
-                        logger.writer.add_text('eval/clean_confusion_matrix_data', str(clean_conf_matrix), epoch)
-                        logger.writer.add_text('eval/poison_confusion_matrix_data', str(poison_conf_matrix), epoch)
-                    
-                except Exception as e:
-                    print(f"无法创建或记录混淆矩阵可视化: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    # <---- 修改: 分开记录表格 -> 合并为一次log，避免wandb对同一step的多次日志合并造成表格显示异常
+                    logger.log({
+                        "eval/clean_confusion_matrix_table": clean_table,
+                        "eval/poison_confusion_matrix_table": poison_table
+                    }, step=epoch)
+                
+                # 对于tensorboard，额外记录混淆矩阵数据为文本
+                elif logger.log_type == 'tensorboard':
+                    # 由于TensorBoard不支持表格，可以将混淆矩阵作为文本记录
+                    logger.writer.add_text('eval/clean_confusion_matrix_data', str(clean_conf_matrix), epoch)
+                    logger.writer.add_text('eval/poison_confusion_matrix_data', str(poison_conf_matrix), epoch)
+                
+            except Exception as e:
+                print(f"无法创建或记录混淆矩阵可视化: {e}")
+                import traceback
+                traceback.print_exc()
     
     return clean_acc, poison_acc, asr
 

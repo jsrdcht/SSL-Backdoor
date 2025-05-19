@@ -112,7 +112,7 @@ def add_watermark(input_image,
         na = np.array(base_image).astype(np.float)
         # Halve all alpha values
         # location = (max(0, min(location[0], na.shape[1])), max(0, min(location[1], na.shape[0]))) # if location is negative, clip at 0
-        # TODO: Aniruddha I ensure that left upper location will never be negative. So I removed clipping.
+        # Aniruddha I ensure that left upper location will never be negative. So I removed clipping.
         na[..., 3][location[1]: (location[1]+w_height), location[0]: (location[0]+w_width)] *= alpha
         base_image = Image.fromarray(na.astype(np.uint8))
         # base_image.show()
@@ -466,7 +466,7 @@ class CorruptEncoderTrainDataset(PoisonedTrainDataset):
                 t_x = int(random.uniform(trigger_delta_x*p_w, o_x-trigger_delta_x*p_w-t_w))
             t_y = int(random.uniform(trigger_delta_y*p_h, p_h-trigger_delta_y*p_h-t_h))
             im.paste(trigger_PIL, (t_x, t_y))
-            #TODO 这里最好对齐我的方法
+            #
             
         else:            
             ### get support poisoned images     

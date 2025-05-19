@@ -74,11 +74,17 @@ def get_channels(arch):
         c = 2048
     elif 'resnet18' in arch:
         c = 512
+    elif 'densenet121' in arch:
+        c = 1024
     elif arch == 'mobilenet':
         c = 1280
+    elif arch == 'MobileNetV2':
+        c = 1280
+    elif arch == 'SqueezeNet':
+        c = 2048
     elif arch == 'resnet50x5_swav':
         c = 10240
-    elif arch == 'vit_base_patch16':
+    elif arch == 'vit_b_16':
         c = 768
     elif arch == 'swin_s':
         c = 768
@@ -166,3 +172,13 @@ def extract_config_by_prefix(config_dict, prefix):
             result[key] = value
     
     return result
+
+
+def set_seed(seed):
+    """设置随机种子以确保结果可重现"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True

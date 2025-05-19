@@ -81,7 +81,7 @@ class Logger:
         初始化日志记录器
         
         Args:
-            log_type: 日志类型，可选值: 'tensorboard', 'wandb', 'none'
+            log_type: 日志类型，可选值: 'tensorboard', 'wandb', 'file', 'none'
             save_dir: 保存目录
             experiment_id: 实验ID
             config: 实验配置
@@ -90,7 +90,9 @@ class Logger:
         self.log_type = log_type.lower()
         self.save_dir = save_dir
         self.writer = None
-        
+        self.file_handler = None
+        self.logger = None # 用于文件日志
+
         if self.log_type == 'tensorboard':
             self.writer = SummaryWriter(save_dir)
             print(f"已初始化TensorBoard日志记录器，保存目录: {save_dir}")
@@ -110,15 +112,35 @@ class Logger:
                 self.writer = wandb
                 print(f"已初始化Weights & Biases日志记录器, 实验ID: {experiment_id}")
             except ImportError:
-                print("警告: wandb库未安装，已禁用wandb日志记录")
+                print("警告: wandb库未安装，已禁用wandb日志记录，切换到 'none'")
                 self.log_type = 'none'
-                
-        elif self.log_type != 'none':
+
+        elif self.log_type == 'file':
+            if not save_dir:
+                raise ValueError("当log_type为'file'时，必须提供save_dir")
+            os.makedirs(save_dir, exist_ok=True)
+            log_file_path = os.path.join(save_dir, "file_log.log")
+            
+            self.logger = logging.getLogger(f"ExperimentLogger_{experiment_id or ''}")
+            self.logger.setLevel(logging.INFO) # 或者根据需要设置其他级别
+            
+            # 防止重复添加 handler
+            if not any(isinstance(h, logging.FileHandler) for h in self.logger.handlers):
+                 self.file_handler = logging.FileHandler(log_file_path, mode='a')
+                 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+                 self.file_handler.setFormatter(formatter)
+                 self.logger.addHandler(self.file_handler)
+                 self.logger.propagate = False # 防止将日志传递给根logger
+
+            print(f"已初始化文件日志记录器，保存路径: {log_file_path}")
+            
+        elif self.log_type == 'none':
+            print("已禁用日志记录")
+            
+        else:
             print(f"警告: 未知的日志类型 '{log_type}'，已禁用日志记录")
             self.log_type = 'none'
-        else:
-            raise ValueError(f"未知的日志类型: {log_type}")
-    
+
     def add_scalar(self, tag, value, step):
         """记录标量值"""
         if self.log_type == 'tensorboard':
@@ -126,6 +148,8 @@ class Logger:
         elif self.log_type == 'wandb':
             # 同时使用log方法记录，以确保在wandb图表中正确显示
             self.writer.log({tag: value}, step=step)
+        elif self.log_type == 'file' and self.logger:
+            self.logger.info(f"[Step {step}] {tag}: {value}")
     
     def add_scalars(self, main_tag, tag_value_dict, step):
         """记录多个标量值"""
@@ -135,7 +159,11 @@ class Logger:
             # 为每个键添加main_tag前缀，确保与TensorBoard兼容
             prefixed_dict = {f"{main_tag}/{k}": v for k, v in tag_value_dict.items()}
             self.writer.log(prefixed_dict, step=step)
-    
+        elif self.log_type == 'file' and self.logger:
+            log_message = f"[Step {step}] {main_tag}: "
+            log_message += ", ".join([f"{k}={v}" for k, v in tag_value_dict.items()])
+            self.logger.info(log_message)
+
     def add_image(self, tag, img_tensor, step):
         """记录图像"""
         if self.log_type == 'tensorboard':
@@ -144,6 +172,9 @@ class Logger:
             if isinstance(img_tensor, torch.Tensor):
                 img_tensor = img_tensor.detach().cpu().numpy()
             self.writer.log({tag: wandb.Image(img_tensor)}, step=step)
+        elif self.log_type == 'file' and self.logger:
+             # 文件日志通常不直接存储图像，只记录事件
+             self.logger.info(f"[Step {step}] Image logged: {tag}")
     
     def log(self, data, step=None):
         """记录数据，兼容wandb.log接口"""
@@ -152,17 +183,33 @@ class Logger:
             for key, value in data.items():
                 if isinstance(value, (int, float)):
                     self.writer.add_scalar(key, value, step)
-                else:
-                    print(f"无法在TensorBoard中记录非标量值: {key}={value}")
+                # else: # 保持原有行为，不打印警告
+                #     print(f"无法在TensorBoard中记录非标量值: {key}={value}")
         elif self.log_type == 'wandb':
             self.writer.log(data, step=step)
-    
+        elif self.log_type == 'file' and self.logger:
+             log_message = f"[Step {step or 'N/A'}] Log data: "
+             if isinstance(data, dict):
+                log_message += ", ".join([f"{k}={v}" for k, v in data.items() if isinstance(v, (int, float, str, bool))])
+             else:
+                log_message += str(data)
+             self.logger.info(log_message)
+
     def close(self):
         """关闭日志记录器"""
         if self.log_type == 'tensorboard':
             self.writer.close()
         elif self.log_type == 'wandb':
-            self.writer.finish()
+            # 确保wandb run存在再finish
+            if wandb.run:
+                self.writer.finish()
+        elif self.log_type == 'file' and self.logger and self.file_handler:
+             # 关闭并移除文件处理器
+             self.file_handler.close()
+             self.logger.removeHandler(self.file_handler)
+             self.file_handler = None # 清理引用
+             self.logger = None # 清理引用
+             print("已关闭文件日志记录器")
 
 
 def get_logger(logpath, filepath, package_files=[], displaying=True, saving=True, debug=False):
@@ -231,16 +278,21 @@ class ProgressMeter(object):
         self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
         self.meters = meters
         self.prefix = prefix
+        self.num_batches = num_batches  # 存储总批次数
 
     def display(self, batch):
-        entries = [self.prefix + self.batch_fmtstr.format(batch)]
+        try:
+            formatted_batch_str = self.batch_fmtstr.format(batch, self.num_batches)
+        except Exception as e:
+            formatted_batch_str = "[ERROR/ERROR]"
+        entries = [self.prefix + formatted_batch_str]
         entries += [str(meter) for meter in self.meters]
         print('\t'.join(entries))
 
     def _get_batch_fmtstr(self, num_batches):
         num_digits = len(str(num_batches // 1))
         fmt = '{:' + str(num_digits) + 'd}'
-        return '[' + fmt + '/' + fmt.format(num_batches) + ']'
+        return '[' + fmt + '/' + fmt + ']'
 
 
 def accuracy(output, target, topk=(1,)):

@@ -1,0 +1,10 @@
+# testset parameters
+train_file: data/CIFAR10/10percent_trainset.txt
+test_file: data/CIFAR10/testset.txt
+attack_target: 0
+trigger_path: assets/triggers/trigger_14.png
+dataset: cifar10
+trigger_size: 8
+trigger_insert: patch
+attack_algorithm: sslbkd
+return_attack_target: False

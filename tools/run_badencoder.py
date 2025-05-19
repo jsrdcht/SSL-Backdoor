@@ -10,10 +10,11 @@ from torchvision import transforms
 from torchvision.models.resnet import ResNet, BasicBlock
 
 from ssl_backdoor.attacks.badencoder.badencoder import run_badencoder
-from ssl_backdoor.attacks.badencoder.datasets import get_poisoning_dataset, get_dataset_evaluation
+from ssl_backdoor.attacks.badencoder.datasets import get_poisoning_dataset
 from ssl_backdoor.ssl_trainers.utils import load_config
 from ssl_backdoor.utils.utils import extract_config_by_prefix
 from ssl_backdoor.datasets import dataset_params
+from ssl_backdoor.datasets.dataset import FileListDataset
 
 
 def parse_args():
@@ -23,6 +24,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='BadEncoder攻击示例')
     parser.add_argument('--config', type=str, required=True,
                         help='基础配置文件路径，支持.py或.yaml格式')
+    parser.add_argument('--test_config', type=str, required=True,
+                        help='测试配置文件路径，支持yaml格式')
     parser.add_argument('--experiment_id', type=str, default=None,
                         help='实验ID（可选，优先使用配置文件中的值）')
     
@@ -38,6 +41,12 @@ def main():
     # 1. 加载基础配置
     print(f"加载基础配置文件: {args.config}")
     config = load_config(args.config)
+    # 1.2 加载攻击的测试文件配置
+    print(f"加载攻击配置文件: {args.test_config}")
+    test_config = load_config(args.test_config)
+    if not isinstance(test_config, dict):
+        raise ValueError(f"攻击配置文件 {args.test_config} 格式错误")
+    test_config = argparse.Namespace(**test_config)
     
     # 2. 命令行参数覆盖基础配置
     if args.experiment_id:
@@ -68,21 +77,64 @@ def main():
     print("加载数据集...")
     
     # 3.1 获取影子数据集（用于训练BadEncoder）
-    shadow_dataset, memory_dataset, test_data_clean, test_data_backdoor = get_poisoning_dataset(
+    shadow_dataset, memory_dataset = get_poisoning_dataset(
         argparse.Namespace(**config)
     )
     
     # 3.2 获取评估数据集
-    # 如果配置了下游评估，则加载目标数据集
-    downstream_train_dataset = None
-    print(config)
-    downstream_train_dataset, _, _ = get_dataset_evaluation(argparse.Namespace(**config))
+    transform = transforms.Compose([
+        transforms.Resize((config['image_size'], config['image_size'])),
+        transforms.ToTensor(),
+        dataset_params[config['shadow_dataset']]['normalize']
+    ])
+    
+    # 下游任务的训练数据集
+    downstream_train_dataset = FileListDataset(
+        args=test_config,
+        path_to_txt_file=test_config.train_file,
+        transform=transform,
+    )
+    # 下游任务的干净测试数据集
+    if hasattr(test_config, 'train_file') and test_config.train_file:
+        test_data_clean = FileListDataset(
+            args=test_config,
+            path_to_txt_file=test_config.test_file,
+            transform=transform
+        )
+    # 创建后门测试数据集
+    from ssl_backdoor.datasets.dataset import OnlineUniversalPoisonedValDataset
+    test_data_backdoor = OnlineUniversalPoisonedValDataset(
+        args=test_config,
+        path_to_txt_file=test_config.test_file,
+        transform=transform
+    )
 
     # 5. 创建预训练模型
     # TODO : 这里用的是 DUPRE 的实现，以后换成我的
-    from ssl_backdoor.attacks.drupe.DRUPE.models import get_encoder_architecture_usage
-    clean_model = get_encoder_architecture_usage(argparse.Namespace(**config)).cuda()
+    # from ssl_backdoor.attacks.drupe.DRUPE.models import get_encoder_architecture_usage
+    # clean_model = get_encoder_architecture_usage(argparse.Namespace(**config)).cuda()
+    # clean_model.eval()
+
+
+    # if config['pretrained_encoder'] != '':
+    #     print(f'加载预训练编码器: {config["pretrained_encoder"]}')
+    #     if config['encoder_usage_info'] == 'cifar10' or config['encoder_usage_info'] == 'stl10':
+    #         checkpoint = torch.load(config['pretrained_encoder'])
+    #         pretrained_encoder.load_state_dict(checkpoint['state_dict'], strict=True)
+    #         backdoored_model.load_state_dict(checkpoint['state_dict'], strict=True)
+    #     elif config['encoder_usage_info'] == 'imagenet' or config['encoder_usage_info'] == 'CLIP':
+    #         checkpoint = torch.load(config['pretrained_encoder'])
+    #         pretrained_encoder.visual.load_state_dict(checkpoint['state_dict'], strict=True)
+    #         backdoored_model.visual.load_state_dict(checkpoint['state_dict'], strict=True)
+    #     else:
+    #         raise NotImplementedError(f"未支持的编码器使用信息: {config['encoder_usage_info']}")
+    from ssl_backdoor.utils.model_utils import load_model
+    clean_model, processor = load_model(config['arch'], config['pretrained_encoder'], dataset=config['encoder_usage_info'])
+    clean_model = clean_model.cuda()
     clean_model.eval()
+
+    for p in clean_model.parameters():
+        p.requires_grad = True
 
     
     # 6. 运行BadEncoder攻击
@@ -110,7 +162,7 @@ def main():
     encoder_usage = config.get('encoder_usage_info', 'cifar10')
 
     if encoder_usage in ['cifar10', 'stl10']:
-        # SimCLR 使用的是修改后的 ResNet18 结构，需要转换参数名
+        # 默认 使用的是修改后的 ResNet18 结构，需要转换参数名
 
         class CustomResNet(ResNet):
             """与 SimCLR 中的 ResNet18 结构保持一致（首层 3×3 卷积）"""
@@ -162,12 +214,13 @@ def main():
         print(f"已保存转换后的 ResNet18 权重到: {converted_path}")
 
     else:
-        raise NotImplementedError(f"未支持的编码器使用信息: {encoder_usage}")
-        # # 对于 ImageNet/CLIP 等，直接按原格式保存
-        # raw_path = os.path.join(config['output_dir'], 'backdoored_model_raw.pth')
-        # torch.save({'state_dict': backdoored_model.state_dict()}, raw_path)
-        # print(f"已保存原始后门模型权重到: {raw_path}")
-    
+        # 直接保存原始模型，不进行转换
+        converted_path = os.path.join(config['output_dir'], 'converted.pth')
+        torch.save({
+            'state_dict': backdoored_model.state_dict(),
+        }, converted_path)
+        print(f"已保存原始模型权重到: {converted_path}")
+
     # 8. 关闭日志文件
     config['logger_file'].close()
     print(f"\n日志保存在: {logger_path}")

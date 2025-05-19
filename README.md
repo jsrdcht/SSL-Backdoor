@@ -27,7 +27,11 @@ This library originated as a rewrite of the SSLBKD implementation, ensuring **co
 
 ## 📢 What's New?
 
-✅ **2024-04-18 Update:**
+✅ **2025-05-19 Update:**
+
+* **DEDE defense is now implemented and available!**
+
+✅ **2025-04-18 Update:**
 
 * **PatchSearch defense is now implemented and available!**
 * **BadEncoder attack is now implemented and available!**
@@ -41,7 +45,7 @@ This library originated as a rewrite of the SSLBKD implementation, ensuring **co
 
 🛡️ **Current Defenses:**
 
-*   **PatchSearch**
+*   **PatchSearch**, **DEDE**
 
 Stay tuned for more updates!
 
@@ -55,15 +59,16 @@ This library currently supports the following poisoning attack algorithms agains
 | CTRL            | [An Embarrassingly Simple Backdoor Attack on Self-supervised Learning](https://openaccess.thecvf.com/content/ICCV2023/html/Li_An_Embarrassingly_Simple_Backdoor_Attack_on_Self-supervised_Learning_ICCV_2023_paper.html) | ICCV 2023  |  |
 | CorruptEncoder  | [Data poisoning based backdoor attacks to contrastive learning](https://openaccess.thecvf.com/content/CVPR2024/html/Zhang_Data_Poisoning_based_Backdoor_Attacks_to_Contrastive_Learning_CVPR_2024_paper.html)       | CVPR 2024  |  |
 | BLTO (inference)| [BACKDOOR CONTRASTIVE LEARNING VIA BI-LEVEL TRIGGER OPTIMIZATION](https://openreview.net/forum?id=oxjeePpgSP)                                                              | ICLR 2024  |  |
-| BadEncoder | [BadEncoder: Backdoor Attacks to Pre-trained Encoders in Self-Supervised Learning](https://ieeexplore.ieee.org/abstract/document/9833644/) | S&P 2022|  |
+| BadEncoder | [BadEncoder: Backdoor Attacks to Pre-trained Encoders in Self-Supervised Learning](https://ieeexplore.ieee.org/abstract/document/9833644/) | S&P 2022| [config](configs/attacks/badencoder.py) |
 
 ## Supported Defenses
 
 We are actively developing and integrating defense mechanisms. Currently, the following defense is implemented:
 
-| Aliase        | Paper                                                                                                      | Config                         | Conference         |
+| Aliase        | Paper                                                                                                      | Conference                         |    Config      |
 |------------------|------------------------------------------------------------------------------------------------------------------|---------------------------------------|----------------|
-| PatchSearch    | [Defending Against Patch-Based Backdoor Attacks on Self-Supervised Learning](https://openaccess.thecvf.com/content/CVPR2023/html/Tejankar_Defending_Against_Patch-Based_Backdoor_Attacks_on_Self-Supervised_Learning_CVPR_2023_paper.html)                                       | [doc](./docs/zh_cn/patchsearch.md), [config](configs/defense/patchsearch.py) | CVPR2023       |
+| PatchSearch    | [Defending Against Patch-Based Backdoor Attacks on Self-Supervised Learning](https://openaccess.thecvf.com/content/CVPR2023/html/Tejankar_Defending_Against_Patch-Based_Backdoor_Attacks_on_Self-Supervised_Learning_CVPR_2023_paper.html)                                       | CVPR2023 |   [doc](./docs/zh_cn/patchsearch.md), [config](configs/defense/patchsearch.py)     |
+| DEDE | [DeDe: Detecting Backdoor Samples for SSL Encoders via Decoders](http://arxiv.org/abs/2411.16154) | CVPR2025 |   [config](configs/defense/dede.py)     |
 
 ## Setup
 

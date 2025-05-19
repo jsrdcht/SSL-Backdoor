@@ -1,0 +1,10 @@
+dataset: imagenet100
+attack_algorithm: sslbkd
+return_attack_target: true # 运行 badencoder 时，需要设置为 true
+attack_target: 6
+trigger_path: assets/triggers/trigger_14.png
+trigger_size: 50
+train_file: data/ImageNet-100/10percent_trainset.txt
+test_file: data/ImageNet-100/valset.txt
+trigger_insert: patch
+

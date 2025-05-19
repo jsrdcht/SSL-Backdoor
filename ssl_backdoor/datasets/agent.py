@@ -163,8 +163,10 @@ class AdaptivePoisoningAgent():
 
 class BadEncoderPoisoningAgent:
     def __init__(self, args):
+        print("BadEncoderPoisoningAgent is going to deprecated, please use add_watermark instead")
         self.args = args
-
+        
+        # vanilla badencoder
         trigger_data = np.load(args.trigger_file)
         self.trigger, self.trigger_mask = trigger_data['t'], trigger_data['tm'] # shape为 (1, 32, 32, 3)
         self.trigger, self.trigger_mask = self.trigger.squeeze(), self.trigger_mask.squeeze()
@@ -172,6 +174,7 @@ class BadEncoderPoisoningAgent:
 
 
     def apply_poison(self, img: Image.Image) -> Image.Image:
+        # vanilla badencoder
         # 检查输入图像尺寸是否与 trigger 一致，不一致则 resize
         trigger_shape = self.trigger.shape
         if isinstance(img, Image.Image):
@@ -193,3 +196,66 @@ class BadEncoderPoisoningAgent:
         backdoored_img = Image.fromarray(backdoored_img)
 
         return backdoored_img
+    
+
+class BadCLIPPoisoningAgent:
+    def __init__(self, args):
+        self.args = args
+        self.trigger_path = args.trigger_path
+        self.trigger_size = args.trigger_size
+        self.mode = args.mode
+        assert self.mode in ['ours_tnature', 'ours_ttemplate', 'vqa', 'blended_kitty', 'blended_banana'], "badclip mode must be one of the following: ours_tnature, ours_ttemplate, vqa, blended_kitty, blended_banana"
+        self.position = args.position
+        assert self.position in ['middle', 'random'], "position must be one of the following: middle, random"
+        assert self.mode == 'ours_tnature' and self.position == 'middle', "only ours_tnature and middle position is supported for now"
+
+        
+        # BadCLIP 的 trigger 植入是在连续空间中进行的，所以需要将 trigger 转换为连续空间
+        if self.mode == 'ours_tnature':
+            _trigger = Image.open(self.trigger_path).convert('RGB')
+            _trigger = _trigger.resize((self.trigger_size, self.trigger_size), Image.BILINEAR)
+            _trigger = np.array(_trigger).astype(np.float32) / 255.0
+            _trigger = np.clip(_trigger, 0, 1)
+            self.trigger = _trigger
+        else:
+            raise ValueError(f"Unsupported mode: {self.mode}")
+        
+        self.image_size = 224
+        print(f"set image_size={self.image_size} for badclip poisoning, it is fixed and cannot be changed. If your dataset image size is not 224, please change the image size manually.")
+
+        
+        
+    def apply_poison(self, image):
+        if isinstance(image, str):
+            image = Image.open(image).convert('RGB')
+        if image.size != (self.image_size, self.image_size):
+            image = image.resize((self.image_size, self.image_size), Image.BILINEAR)
+        image = np.array(image)
+        image = image.astype(np.float32) / 255.0
+        image = np.clip(image, 0, 1)
+
+        if self.mode == 'ours_tnature':
+            # 将触发器添加到图像中间位置
+            trigger = self.trigger
+            # 获取图像和触发器尺寸
+            img_h, img_w = image.shape[:2]
+            trigger_h, trigger_w = trigger.shape[:2]
+            
+            # 计算图像中心点
+            c_h = int(img_h / 2)
+            c_w = int(img_w / 2)
+            
+            # 计算触发器左上角的位置
+            s_h = int(c_h - trigger_h / 2)
+            s_w = int(c_w - trigger_w / 2)
+            
+            # 将触发器放在图像中间位置
+            image[s_h:s_h+trigger_h, s_w:s_w+trigger_w] = trigger
+            
+            # 转换回PIL图像
+            image = (image * 255).astype(np.uint8)
+            return Image.fromarray(image)
+        else:
+            raise ValueError(f"Unsupported mode: {self.mode}")
+        
+        

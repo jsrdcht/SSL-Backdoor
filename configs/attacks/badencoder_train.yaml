@@ -1,0 +1,12 @@
+image_size: 32
+shadow_dataset: cifar10
+shadow_file: data/CIFAR10/trainset.txt
+memory_file: data/CIFAR10/trainset.txt
+reference_file: assets/references/drupe_gtsrb_l12_n3/references.txt
+trigger_file: assets/triggers/white_10x10.png
+
+shadow_fraction: 0.2
+trigger_size: 10
+
+# 不经常改动的参数
+n_ref: 3

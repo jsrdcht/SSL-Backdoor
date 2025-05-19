@@ -64,12 +64,15 @@ def train_badencoder(backdoored_encoder, clean_encoder, data_loader, train_optim
     clean_encoder.eval()
 
     # 创建进度条
-    losses = AverageMeter('Loss', ':.4f')
-    losses_0 = AverageMeter('Loss_0', ':.4f')  # 后门特征与参考特征的相似度
-    losses_1 = AverageMeter('Loss_1', ':.4f')  # 增强参考与原始参考的不相似度
-    losses_2 = AverageMeter('Loss_2', ':.4f')  # 干净输入特征的保持
-    losses_3 = AverageMeter('Loss_3', ':.4f')  # 参考输入之间的相似度
-    meters = [losses, losses_0, losses_1, losses_2, losses_3]
+    losses = AverageMeter('Loss', '.4f')
+    losses_0 = AverageMeter('Loss_0', '.4f')  # 后门特征与参考特征的相似度
+    losses_1 = AverageMeter('Loss_1', '.4f')  # 增强参考与原始参考的不相似度
+    losses_2 = AverageMeter('Loss_2', '.4f')  # 干净输入特征的保持
+    wasserstein_distances = AverageMeter('WD', '.6f')  # Wasserstein距离
+    
+    meters = [losses, losses_0, losses_1, losses_2]
+    meters.append(wasserstein_distances)
+    
     progress = ProgressMeter(len(data_loader), meters, prefix=f"Epoch: [{epoch}/{args.epochs}]")
     
     # 训练循环
@@ -126,35 +129,31 @@ def train_badencoder(backdoored_encoder, clean_encoder, data_loader, train_optim
             feature_reference_aug = F.normalize(feature_reference_aug, dim=-1)
             feature_reference_aug_list.append(feature_reference_aug)
 
+        if len(feature_backdoor_before_normalize_list) > 0:
+            dis_backdoor2clean = ot.sliced_wasserstein_distance(
+                feature_backdoor_before_normalize_list[0].clone().detach().cpu(), feature_raw_before_normalize.clone().detach().cpu()
+            )
+            wasserstein_distances.update(dis_backdoor2clean.item())
+            
         # 计算损失
         loss_0_list = []
         loss_1_list = []
         
         # 损失0: 使后门图像特征与参考图像特征相似
-        for i in range(len(feature_reference_list)):
-            loss_0_list.append(torch.sum(feature_backdoor_list[i] * feature_reference_list[i], dim=-1).mean())
-            # 损失1: 使增强的参考图像特征与原始参考图像特征不同（以保持干净功能）
-            loss_1_list.append(-torch.sum(feature_reference_aug_list[i] * clean_feature_reference_list[i], dim=-1).mean())
+        for j in range(len(feature_reference_list)):
+            loss_0_list.append(-torch.sum(feature_backdoor_list[j] * feature_reference_list[j], dim=-1).mean())
+            # 损失1: 使增强的参考图像特征与原始参考图像特征相同
+            loss_1_list.append(-torch.sum(feature_reference_aug_list[j] * clean_feature_reference_list[j], dim=-1).mean())
         
-        loss_0 = -sum(loss_0_list)/len(loss_0_list)
+        loss_0 = sum(loss_0_list)/len(loss_0_list)
         loss_1 = sum(loss_1_list)/len(loss_1_list)
         
-        # 损失2: 保持干净图像的特征不变
+        # 损失2: 保持shadow图像的特征不变
         loss_2 = -torch.sum(feature_raw * clean_feature_raw, dim=-1).mean()
         
-        # 损失3: 参考图像之间的相似度
-        loss_3_list = []
-        for i in range(len(feature_reference_list)):
-            for j in range(i, len(feature_reference_list)):
-                loss_3_list.append(torch.sum(feature_reference_list[i] * feature_reference_list[j], dim=-1).mean())
-        
-        loss_3 = sum(loss_3_list)/len(loss_3_list) if loss_3_list else torch.tensor(0.0).cuda()
         
         # 总损失
-        if args.mode == "badencoder":
-            loss = loss_0 + args.lambda1 * loss_1 + args.lambda2 * loss_2
-        else:
-            raise ValueError(f"不支持的模式: {args.mode}")
+        loss = loss_0 + args.lambda1 * loss_1 + args.lambda2 * loss_2
 
         # 反向传播
         train_optimizer.zero_grad()
@@ -166,8 +165,8 @@ def train_badencoder(backdoored_encoder, clean_encoder, data_loader, train_optim
         losses_0.update(loss_0.item())
         losses_1.update(loss_1.item())
         losses_2.update(loss_2.item())
-        losses_3.update(loss_3.item())
         
+
         if i % args.print_freq == 0:
             progress.display(i)
             
@@ -178,8 +177,14 @@ def train_badencoder(backdoored_encoder, clean_encoder, data_loader, train_optim
                                      f"Loss_0: {losses_0.val:.4f} ({losses_0.avg:.4f}) "
                                      f"Loss_1: {losses_1.val:.4f} ({losses_1.avg:.4f}) "
                                      f"Loss_2: {losses_2.val:.4f} ({losses_2.avg:.4f}) "
-                                     f"Loss_3: {losses_3.val:.4f} ({losses_3.avg:.4f})\n")
+                                     f" WD: {wasserstein_distances.val:.6f} ({wasserstein_distances.avg:.6f})"
+                                     f"\n")
                 args.logger_file.flush()
+
+    if hasattr(args, 'current_wasserstein_distance'):
+        args.current_wasserstein_distance = wasserstein_distances.avg
+    else:
+        args.current_wasserstein_distance = wasserstein_distances.avg
 
     return losses.avg
 
@@ -319,15 +324,19 @@ def train_downstream_classifier(args, model, train_data, test_data_clean, test_d
         shuffle=False, num_workers=args.num_workers, pin_memory=True
     )
     
-    classes = dataset_params[args.downstream_dataset]['classes']
-    num_of_classes = len(classes)
+    num_of_classes = dataset_params[args.downstream_dataset]['num_classes']
     print(f"下游分类任务类别数: {num_of_classes}")
     
     # 提取特征
     if args.encoder_usage_info in ['CLIP', 'imagenet']:
-        feature_bank_training, label_bank_training = predict_feature(model.visual, train_loader)
-        feature_bank_testing, label_bank_testing = predict_feature(model.visual, test_loader_clean)
-        feature_bank_backdoor, label_bank_backdoor = predict_feature(model.visual, test_loader_backdoor)
+        # 原始代码，暂时不要删除
+        # feature_bank_training, label_bank_training = predict_feature(model.visual, train_loader)
+        # feature_bank_testing, label_bank_testing = predict_feature(model.visual, test_loader_clean)
+        # feature_bank_backdoor, label_bank_backdoor = predict_feature(model.visual, test_loader_backdoor)
+        # 修改为
+        feature_bank_training, label_bank_training = predict_feature(model, train_loader)
+        feature_bank_testing, label_bank_testing = predict_feature(model, test_loader_clean)
+        feature_bank_backdoor, label_bank_backdoor = predict_feature(model, test_loader_backdoor)
     else:
         feature_bank_training, label_bank_training = predict_feature(model.f, train_loader)
         feature_bank_testing, label_bank_testing = predict_feature(model.f, test_loader_clean)
@@ -382,6 +391,16 @@ def run_badencoder(args, pretrained_encoder, shadow_dataset=None, memory_dataset
     # 确保输出目录存在
     os.makedirs(args.output_dir, exist_ok=True)
     
+    # [WASSERSTEIN_LOG_START] 创建CSV日志文件
+    log_path = "/workspace/SSL-Backdoor/badencoder_log.csv"
+    log_exists = os.path.exists(log_path)
+    
+    # 打开CSV日志文件，准备记录Wasserstein距离
+    csv_log = open(log_path, "a")
+    if not log_exists:
+        csv_log.write("epoch,loss,wasserstein_distance\n")
+    # [WASSERSTEIN_LOG_END]
+    
     # 创建数据加载器
     train_loader = DataLoader(
         shadow_dataset, batch_size=args.batch_size, shuffle=True, 
@@ -397,22 +416,27 @@ def run_badencoder(args, pretrained_encoder, shadow_dataset=None, memory_dataset
                                     weight_decay=args.weight_decay, momentum=args.momentum)
     else:  # 'imagenet' or 'CLIP'
         assert args.encoder_usage_info == 'imagenet' or args.encoder_usage_info == 'CLIP', f"未支持的编码器使用信息: {args.encoder_usage_info}"
-        optimizer = torch.optim.SGD(backdoored_model.visual.parameters(), lr=args.lr, 
-                                   weight_decay=args.weight_decay, momentum=args.momentum)
+        # 原始代码，暂时不要删除
+        # optimizer = torch.optim.SGD(backdoored_model.visual.parameters(), lr=args.lr, 
+        #                            weight_decay=args.weight_decay, momentum=args.momentum)
+        # 修改为
+        optimizer = torch.optim.Adam(backdoored_model.parameters(), lr=args.lr, 
+                                   weight_decay=args.weight_decay)
     
+    # 原始代码，暂时不要删除
     # 加载预训练的编码器
-    if args.pretrained_encoder != '':
-        print(f'加载预训练编码器: {args.pretrained_encoder}')
-        if args.encoder_usage_info == 'cifar10' or args.encoder_usage_info == 'stl10':
-            checkpoint = torch.load(args.pretrained_encoder)
-            pretrained_encoder.load_state_dict(checkpoint['state_dict'], strict=True)
-            backdoored_model.load_state_dict(checkpoint['state_dict'], strict=True)
-        elif args.encoder_usage_info == 'imagenet' or args.encoder_usage_info == 'CLIP':
-            checkpoint = torch.load(args.pretrained_encoder)
-            pretrained_encoder.visual.load_state_dict(checkpoint['state_dict'], strict=True)
-            backdoored_model.visual.load_state_dict(checkpoint['state_dict'], strict=True)
-        else:
-            raise NotImplementedError(f"未支持的编码器使用信息: {args.encoder_usage_info}")
+    # if args.pretrained_encoder != '':
+    #     print(f'加载预训练编码器: {args.pretrained_encoder}')
+    #     if args.encoder_usage_info == 'cifar10' or args.encoder_usage_info == 'stl10':
+    #         checkpoint = torch.load(args.pretrained_encoder)
+    #         pretrained_encoder.load_state_dict(checkpoint['state_dict'], strict=True)
+    #         backdoored_model.load_state_dict(checkpoint['state_dict'], strict=True)
+    #     elif args.encoder_usage_info == 'imagenet' or args.encoder_usage_info == 'CLIP':
+    #         checkpoint = torch.load(args.pretrained_encoder)
+    #         pretrained_encoder.visual.load_state_dict(checkpoint['state_dict'], strict=True)
+    #         backdoored_model.visual.load_state_dict(checkpoint['state_dict'], strict=True)
+    #     else:
+    #         raise NotImplementedError(f"未支持的编码器使用信息: {args.encoder_usage_info}")
     
     # 创建检查点目录
     checkpoint_dir = os.path.join(args.output_dir, 'checkpoints')
@@ -427,6 +451,10 @@ def run_badencoder(args, pretrained_encoder, shadow_dataset=None, memory_dataset
     best_loss = float('inf')
     start_epoch = 0
     
+    # [WASSERSTEIN_LOG_START] 初始化当前Wasserstein距离属性
+    args.current_wasserstein_distance = 0.0
+    # [WASSERSTEIN_LOG_END]
+    
     # 训练循环
     for epoch in range(start_epoch, args.epochs):
         print("=================================================")
@@ -437,16 +465,34 @@ def run_badencoder(args, pretrained_encoder, shadow_dataset=None, memory_dataset
                 optimizer, epoch, args, warm_up=(epoch < args.warm_up_epochs)
             )
         elif args.encoder_usage_info == 'imagenet' or args.encoder_usage_info == 'CLIP':
+            # 原始代码，暂时不要删除
+            # train_loss = train_badencoder(
+            #     backdoored_model.visual, pretrained_encoder.visual, train_loader, 
+            #     optimizer, epoch, args, warm_up=(epoch < args.warm_up_epochs)
+            # )
+            # 修改为
             train_loss = train_badencoder(
-                backdoored_model.visual, pretrained_encoder.visual, train_loader, 
+                backdoored_model, pretrained_encoder, train_loader, 
                 optimizer, epoch, args, warm_up=(epoch < args.warm_up_epochs)
             )
         else:
             raise NotImplementedError(f"未支持的编码器使用信息: {args.encoder_usage_info}")
         
+        # [WASSERSTEIN_LOG_START] 记录到CSV文件
+        wasserstein_distance = args.current_wasserstein_distance
+        print(f"Epoch {epoch}: Wasserstein Distance = {wasserstein_distance:.6f}")
+        csv_log.write(f"{epoch},{train_loss:.6f},{wasserstein_distance:.6f}\n")
+        csv_log.flush()
+        # [WASSERSTEIN_LOG_END]
+        
         # 更新学习率
         # DUPRE 的实现里面没有学习率调整
         # scheduler.step()
+        
+        # 将训练信息记录到日志
+        if hasattr(args, 'logger_file'):
+            args.logger_file.write(f"Epoch: [{epoch}/{args.epochs}] Training Loss: {train_loss:.4f} WD: {wasserstein_distance:.6f}\n")
+            args.logger_file.flush()
         
         # 保存最佳模型
         if train_loss < best_loss:
@@ -459,6 +505,10 @@ def run_badencoder(args, pretrained_encoder, shadow_dataset=None, memory_dataset
                 'loss': train_loss,
             }, best_checkpoint_path)
             print(f"保存最佳模型到: {best_checkpoint_path}, 损失: {best_loss:.4f}")
+            # 记录最佳模型信息到日志
+            if hasattr(args, 'logger_file'):
+                args.logger_file.write(f"保存最佳模型到: {best_checkpoint_path}, 损失: {best_loss:.4f}\n")
+                args.logger_file.flush()
         
         # 定期保存检查点
         if (epoch + 1) % args.save_freq == 0:
@@ -470,6 +520,10 @@ def run_badencoder(args, pretrained_encoder, shadow_dataset=None, memory_dataset
                 'loss': train_loss,
             }, checkpoint_path)
             print(f"保存检查点到: {checkpoint_path}")
+            # 记录检查点信息到日志
+            if hasattr(args, 'logger_file'):
+                args.logger_file.write(f"保存检查点到: {checkpoint_path}\n")
+                args.logger_file.flush()
         
         # 在某些周期评估下游任务
         if (epoch + 1) % args.eval_freq == 0 and all(x is not None for x in [downstream_train_dataset, test_data_clean, test_data_backdoor]):
@@ -478,6 +532,10 @@ def run_badencoder(args, pretrained_encoder, shadow_dataset=None, memory_dataset
                 test_data_clean, test_data_backdoor
             )
             print(f"下游评估: BA={results['BA']:.2f}%, ASR={results['ASR']:.2f}%")
+            # 记录下游评估结果到日志
+            if hasattr(args, 'logger_file'):
+                args.logger_file.write(f"Epoch: [{epoch}/{args.epochs}] 下游评估: BA={results['BA']:.2f}%, ASR={results['ASR']:.2f}%\n")
+                args.logger_file.flush()
     
     # 加载最佳模型进行最终评估
     checkpoint = torch.load(os.path.join(args.output_dir, 'best_model.pth'))
@@ -491,8 +549,17 @@ def run_badencoder(args, pretrained_encoder, shadow_dataset=None, memory_dataset
             test_data_clean, test_data_backdoor
         )
         print(f"最终结果: BA={final_results['BA']:.2f}%, ASR={final_results['ASR']:.2f}%")
+        # 记录最终评估结果到日志
+        if hasattr(args, 'logger_file'):
+            args.logger_file.write("\n====== 最终下游任务评估 ======\n")
+            args.logger_file.write(f"最终结果: BA={final_results['BA']:.2f}%, ASR={final_results['ASR']:.2f}%\n")
+            args.logger_file.flush()
     else:
         final_results = None
+    
+    # [WASSERSTEIN_LOG_START] 关闭CSV日志文件
+    csv_log.close()
+    # [WASSERSTEIN_LOG_END]
     
     elapsed_time = time.time() - start_time
     print(f"BadEncoder训练完成，耗时: {elapsed_time:.2f}秒")
