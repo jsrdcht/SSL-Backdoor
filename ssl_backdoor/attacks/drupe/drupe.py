@@ -314,8 +314,13 @@ def train_drupe(backdoored_encoder, clean_encoder, data_loader, train_optimizer,
         # 损失3: 参考特征间的相似度
         loss_3_list = []
         for _index in range(len(feature_reference_list)):
-            for _index_2 in range(i, len(feature_reference_list)):
-                loss_3_list.append(torch.sum(feature_reference_list[_index] * feature_reference_list[_index_2], dim=-1).mean())
+            for _index_2 in range(_index + 1, len(feature_reference_list)):
+                loss_3_list.append(
+                    torch.sum(
+                        feature_reference_list[_index] * feature_reference_list[_index_2],
+                        dim=-1
+                    ).mean()
+                )
         
         loss_3 = sum(loss_3_list) / len(loss_3_list) if loss_3_list else torch.tensor(0.0).cuda()
         
