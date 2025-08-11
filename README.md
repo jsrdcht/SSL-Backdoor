@@ -27,6 +27,10 @@ This library originated as a rewrite of the SSLBKD implementation, ensuring **co
 
 ## 📢 What's New?
 
+✅ **2025-08-11 Update:**
+
+* **DRUPE attack is now implemented and available!** See paper: [Distribution Preserving Backdoor Attack in Self-supervised Learning](https://www.computer.org/csdl/proceedings-article/sp/2024/313000a029/1RjEa5rjsHK)
+
 ✅ **2025-05-19 Update:**
 
 * **DEDE defense is now implemented and available!**
@@ -40,7 +44,7 @@ This library originated as a rewrite of the SSLBKD implementation, ensuring **co
 
 ✅ **Current Support:**
 
-*   **Attack Algorithms:** SSLBKD, CTRL, CorruptEncoder, BLTO (inference only), BadEncoder
+*   **Attack Algorithms:** SSLBKD, CTRL, CorruptEncoder, BLTO (inference only), BadEncoder, DRUPE
 *   **SSL Methods:** MoCo, SimCLR, SimSiam, BYOL
 
 🛡️ **Current Defenses:**
@@ -60,6 +64,7 @@ This library currently supports the following poisoning attack algorithms agains
 | CorruptEncoder  | [Data poisoning based backdoor attacks to contrastive learning](https://openaccess.thecvf.com/content/CVPR2024/html/Zhang_Data_Poisoning_based_Backdoor_Attacks_to_Contrastive_Learning_CVPR_2024_paper.html)       | CVPR 2024  |  |
 | BLTO (inference)| [BACKDOOR CONTRASTIVE LEARNING VIA BI-LEVEL TRIGGER OPTIMIZATION](https://openreview.net/forum?id=oxjeePpgSP)                                                              | ICLR 2024  |  |
 | BadEncoder | [BadEncoder: Backdoor Attacks to Pre-trained Encoders in Self-Supervised Learning](https://ieeexplore.ieee.org/abstract/document/9833644/) | S&P 2022| [config](configs/attacks/badencoder.py) |
+| DRUPE | [Distribution Preserving Backdoor Attack in Self-supervised Learning](https://www.computer.org/csdl/proceedings-article/sp/2024/313000a029/1RjEa5rjsHK) | S&P 2024 | [config](configs/attacks/drupe.py), [train](configs/attacks/drupe_train.yaml), [test](configs/attacks/drupe_test.yaml) |
 
 ## Supported Defenses
 
@@ -101,26 +106,21 @@ bash tools/train.sh <path_to_your_config.yaml>
 
 *Please refer to the `configs` directory and specific training scripts for detailed usage and parameter options.*
 
-## Performance Benchmarks (Legacy)
 
-*(Note: These results are based on the original implementation before the current refactoring.)*
 
-| Algorithm       | Method | Clean Acc ↑ | Backdoor Acc ↓ | ASR ↑ |
-|-----------------|--------|-------------|----------------|-------|
-| SSLBKD          | BYOL   | 66.38%       | 23.82%          | 70.2% |
-| SSLBKD          | SimCLR | 70.9%       | 49.1%          | 33.9% |
-| SSLBKD          | MoCo   | 66.28%       | 33.24%          | 57.6% |
-| SSLBKD          | SimSiam| 64.48%       | 29.3%          | 62.2% |
-| CorruptEncoder  | BYOL   |     65.48%   |       25.3%      |  9.66%     |
-| CorruptEncoder  | SimCLR |       70.14%      |  45.38%  |   36.9%    |
-| CorruptEncoder  | MoCo   |   67.04%   |     38.64%           |  37.3%     |
-| CorruptEncoder  | SimSiam|     57.54%        |   14.14%   |   79.48%    |
 
-| Algorithm       | Method | Clean Acc ↑ | Backdoor Acc ↓ | ASR ↑ |
-|-----------------|--------|-------------|----------------|-------|
-| CTRL            | BYOL   | 75.02%       | 30.87%          | 66.95% |
-| CTRL            | SimCLR | 70.32%       | 20.82%          | 81.97% |
-| CTRL            | MoCo   | 71.01%       | 54.5%          | 34.34% |
-| CTRL            | SimSiam| 71.04%       | 50.36%          | 41.43% |
 
-* Data calculated using the 10% available data evaluation protocol from the SSLBKD paper on the lorikeet class of ImageNet-100 and the airplane class of CIFAR-10, respectively.
+
+
+
+# Citation
+
+```bibtex
+@misc{jsrdcht_ssl_backdoor_2025,
+  title        = {SSL-Backdoor: A PyTorch library for SSL backdoor research},
+  author       = {jsrdcht},
+  year         = {2025},
+  howpublished = {\url{https://github.com/jsrdcht/SSL-Backdoor/}},
+  note         = {MIT License, accessed 2025-08-11}
+}
+```
