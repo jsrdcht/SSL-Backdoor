@@ -295,12 +295,12 @@ def train_drupe(backdoored_encoder, clean_encoder, data_loader, train_optimizer,
         
         # 计算后门特征内部相似度
         sim_matrix = torch.mm(feature_backdoor_list[0], feature_backdoor_list[0].T)
-        distance = (sim_matrix - torch.diag_embed(sim_matrix)).mean()
+        distance = (sim_matrix - torch.diag_embed(sim_matrix.diag())).mean()
         sim_backdoor2backdoor_list.append(distance)
         
         # 计算干净特征内部相似度
         sim_matrix = torch.mm(feature_raw, feature_raw.T)
-        distance = (sim_matrix - torch.diag_embed(sim_matrix)).mean()
+        distance = (sim_matrix - torch.diag_embed(sim_matrix.diag())).mean()
         sim_clean2clean_list.append(distance)
         
         # 损失2: 保持干净图像的特征不变
