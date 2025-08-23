@@ -85,11 +85,15 @@ Get started with SSL-Backdoor quickly:
     cd SSL-Backdoor
     ```
 
-2.  **Install dependencies (optional but recommended):**
+2.  **Environment (Pixi CUDA only):**
     ```bash
-    pip install -r requirements.txt
+    # resolve/create the CUDA environment defined in pixi.toml
+    pixi install -e cuda
+    # quick check of core deps and CUDA availability
+    pixi run -e cuda check
+    # open an interactive shell in the CUDA env (optional)
+    pixi shell -e cuda
     ```
-    *Consider using a virtual environment (`conda`, `venv`, etc.) to manage dependencies.* 
 
 ## Usage
 
