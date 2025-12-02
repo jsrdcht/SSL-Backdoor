@@ -14,18 +14,14 @@
 
 # SSL-Backdoor
 
-SSL-Backdoor is an academic research library dedicated to exploring **poisoning attacks in self-supervised learning (SSL)**. Our goal is to provide a comprehensive and unified platform for researchers to implement, evaluate, and compare various attack and defense mechanisms in the context of SSL.
-
-This library originated as a rewrite of the SSLBKD implementation, ensuring **consistent training protocols** and **hyperparameter fidelity** for fair comparisons. We've since expanded its capabilities significantly.
-
-**Key Features:**
-
-1.  **Unified Poisoning & Training Framework:** Streamlined pipeline for applying diverse poisoning strategies and training SSL models.
-2.  **Decoupled Design:** We strive to maintain a decoupled design, allowing each method to be modified independently, while unifying the implementation of essential tools where necessary.
-
-*Future plans include support for multimodal contrastive learning models.*
+SSL-Backdoor is an academic research library 为了 **backdoor attacks in self-supervised learning (SSL)**. Our goal is to provide a comprehensive and unified platform for researchers to implement, evaluate, and compare various attacks and defenses in the context of SSL.
 
 ## 📢 What's New?
+
+✅ **2025-12-02 Update:**
+
+* **SSL-Cleanse is now available!** See paper: [SSL-Cleanse: Trojan detection and mitigation in self-supervised learning](https://link.springer.com/chapter/10.1007/978-3-031-73021-4_24)
+
 
 ✅ **2025-08-11 Update:**
 
@@ -39,19 +35,6 @@ This library originated as a rewrite of the SSLBKD implementation, ensuring **co
 
 * **PatchSearch defense is now implemented and available!**
 * **BadEncoder attack is now implemented and available!**
-
-🔄 **Active Refactoring Underway!** We are currently refactoring the codebase to improve code quality, maintainability, and ease of use. Expect ongoing improvements!
-
-✅ **Current Support:**
-
-*   **Attack Algorithms:** SSLBKD, CTRL, CorruptEncoder, BLTO (inference only), BadEncoder, DRUPE
-*   **SSL Methods:** MoCo, SimCLR, SimSiam, BYOL
-
-🛡️ **Current Defenses:**
-
-*   **PatchSearch**, **DEDE**
-
-Stay tuned for more updates!
 
 ## Supported Attacks
 
@@ -74,6 +57,7 @@ We are actively developing and integrating defense mechanisms. Currently, the fo
 |------------------|------------------------------------------------------------------------------------------------------------------|---------------------------------------|----------------|
 | PatchSearch    | [Defending Against Patch-Based Backdoor Attacks on Self-Supervised Learning](https://openaccess.thecvf.com/content/CVPR2023/html/Tejankar_Defending_Against_Patch-Based_Backdoor_Attacks_on_Self-Supervised_Learning_CVPR_2023_paper.html)                                       | CVPR2023 |   [doc](./docs/zh_cn/patchsearch.md), [config](configs/defense/patchsearch.py)     |
 | DEDE | [DeDe: Detecting Backdoor Samples for SSL Encoders via Decoders](http://arxiv.org/abs/2411.16154) | CVPR2025 |   [config](configs/defense/dede.py)     |
+| SSL-Cleanse | [SSL-Cleanse: Trojan detection and mitigation in self-supervised learning](https://link.springer.com/chapter/10.1007/978-3-031-73021-4_24) | ECCV2024 |   [config](configs/defense/ssl_cleanse.py)     |
 
 ## Setup
 

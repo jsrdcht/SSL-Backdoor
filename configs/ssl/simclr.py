@@ -24,7 +24,7 @@ config = {
     
 
     # 攻击相关参数
-    'attack_algorithm': 'sslbkd',  # 'bp', 'corruptencoder', 'sslbkd', 'ctrl', 'clean', 'blto', 'optimized'
+    'attack_algorithm': 'sslbkd',  # 'corruptencoder', 'sslbkd', 'ctrl', 'clean', 'blto', 'optimized'
     'ablation': False,
 
     # SimCLR特定参数
@@ -36,7 +36,7 @@ config = {
 
     # 实验记录
     'experiment_id': 'simclr_imagenet-100_test',
-    'save_folder_root': '/workspace/SSL-Backdoor/results/test',
+    'save_folder_root': '',
     'save_freq': 30,
     'eval_frequency': 30,
     

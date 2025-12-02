@@ -25,7 +25,7 @@ config = {
     'feature_dim': 512,  # 特征维度
 
     # 攻击相关参数
-    'attack_algorithm': 'sslbkd',  # 'bp', 'corruptencoder', 'sslbkd', 'ctrl', 'clean', 'blto', 'optimized'
+    'attack_algorithm': 'sslbkd',  # 'corruptencoder', 'sslbkd', 'ctrl', 'clean', 'blto', 'optimized'
     'ablation': False,
 
     # BYOL特定参数
@@ -37,8 +37,8 @@ config = {
     'amp': True,
 
     # 实验记录
-    'experiment_id': 'byol_imagenet-100_test',
-    'save_folder_root': '/workspace/SSL-Backdoor/results/test',
+    'experiment_id': '',
+    'save_folder_root': '',
     'save_freq': 30,
     'eval_frequency': 30,
     

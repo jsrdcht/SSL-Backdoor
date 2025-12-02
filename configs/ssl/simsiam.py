@@ -24,7 +24,7 @@ config = {
     'feature_dim': 2048, # 注意：SimSiam论文中使用2048
 
     # 攻击相关参数
-    'attack_algorithm': 'bp',  # 'bp', 'corruptencoder', 'sslbkd', 'ctrl', 'clean', 'blto', 'optimized'
+    'attack_algorithm': 'sslbkd',  # 'corruptencoder', 'sslbkd', 'ctrl', 'clean', 'blto', 'optimized'
     'ablation': False,
 
     # SimSiam特定参数
@@ -38,8 +38,8 @@ config = {
     'amp': True,
 
     # 实验记录
-    'experiment_id': 'na_simsiam_imagenet100_target6', # 更新实验ID
-    'save_folder_root': '/workspace/SSL-Backdoor/results/test',
+    'experiment_id': '', # 更新实验ID
+    'save_folder_root': '',
     'save_freq': 30,
     'eval_frequency': 30,
     
