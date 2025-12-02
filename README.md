@@ -14,7 +14,7 @@
 
 # SSL-Backdoor
 
-SSL-Backdoor is an academic research library 为了 **backdoor attacks in self-supervised learning (SSL)**. Our goal is to provide a comprehensive and unified platform for researchers to implement, evaluate, and compare various attacks and defenses in the context of SSL.
+SSL-Backdoor is an academic research library for **backdoor attacks in self-supervised learning (SSL)**. Our goal is to provide a comprehensive and unified platform for researchers to implement, evaluate, and compare various attacks and defenses in the context of SSL.
 
 ## 📢 What's New?
 

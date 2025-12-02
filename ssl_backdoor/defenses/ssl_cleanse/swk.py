@@ -41,6 +41,24 @@ class SWK:
             data = data.detach().cpu().numpy()
         
         n_samples = data.shape[0]
+
+        # 当样本数不足以覆盖给定的 k 范围时，直接做安全降级，避免空序列导致的 argmax 异常
+        # 典型问题场景：所有 k >= n_samples，for 循环立即 break，silhouette_scores 为空。
+        if n_samples <= self.k_min:
+            logging.warning(
+                "SWK: n_samples (%d) <= k_min (%d)，无法在给定范围内进行有效聚类分析，"
+                "将退化为简单启发式：k = min(max(2, n_samples-1), k_min)。",
+                n_samples,
+                self.k_min,
+            )
+            if n_samples <= 1:
+                # 只有 0/1 个样本时，聚类本身就无意义，直接返回 1
+                fallback_k = 1
+            else:
+                # 至少保证 2 个簇、同时不超过给定的 k_min
+                fallback_k = min(max(2, n_samples - 1), self.k_min)
+            return fallback_k, fallback_k
+
         self.k_values = list(range(self.k_min, self.k_max + 1, self.step))
         self.sse_scores = []
         self.silhouette_scores = []
@@ -71,8 +89,20 @@ class SWK:
             
             logging.debug(f"k={k}: SSE={kmeans.inertia_:.4f}, Silhouette={score:.4f}")
 
-        best_k_sse = self._find_knee_point(self.k_values, self.sse_scores)
-        best_k_sil = self.k_values[np.argmax(self.silhouette_scores)]
+        # 只对真正参与聚类分析的 k 做拐点搜索，避免 self.k_values 与得分长度不一致
+        valid_len = len(self.sse_scores)
+        if valid_len == 0:
+            # 正常情况下不会走到这里（上面已经对 n_samples <= k_min 做了早返回），
+            # 但为了防御性编程，这里再兜一层底。
+            logging.warning("SWK: 有效的聚类结果为空，回退到 k_min 作为默认聚类数。")
+            return self.k_min, self.k_min
+
+        used_k_values = self.k_values[:valid_len]
+        # 保持成员变量与实际使用的一致，便于调试与可视化
+        self.k_values = used_k_values
+
+        best_k_sse = self._find_knee_point(used_k_values, self.sse_scores)
+        best_k_sil = used_k_values[np.argmax(self.silhouette_scores)]
         
         logging.info(f"SWK Analysis Result: Suggested k (SSE/Elbow) = {best_k_sse}, Suggested k (Silhouette) = {best_k_sil}")
         
