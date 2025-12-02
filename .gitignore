@@ -42,9 +42,6 @@ ssl_backdoor/defenses/dede/DeDe/
 __pycache__/
 **/__pycache__/
 .hypothesis/
-ssl_pretrain.py
-methods.py
-test.py
 assets/references/drupe_gtsrb_l12_n3
 assets/references/imagenet
 ssl_backdoor/attacks/badencoder/badencoder_vanilla.py

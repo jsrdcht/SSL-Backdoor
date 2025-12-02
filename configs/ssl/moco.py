@@ -45,7 +45,7 @@ config = {
     
     # 实验记录
     'experiment_id': 'moco_imagenet-100_test',
-    'save_folder_root': '/workspace/SSL-Backdoor/results/test',
+    'save_folder_root': '',
     'save_freq': 30,
     
     # 日志配置

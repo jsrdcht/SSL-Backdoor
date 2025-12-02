@@ -25,7 +25,7 @@ config = {
     'shadow_file': 'data/ImageNet-100/10percent_trainset.txt',
     'shadow_fraction': 0.5,
     # reference data 相关参数
-    'reference_file': '/workspace/SSL-Backdoor/assets/references/imagenet/references.txt',
+    'reference_file': 'assets/references/imagenet/references.txt',
     'reference_label': 6,                    # 参考标签（目标类）
     
     'n_ref': 3,                               # 参考输入数量
@@ -56,6 +56,6 @@ config = {
     
     # 系统参数
     'seed': 42,                               # 随机种子
-    'output_dir': '/workspace/SSL-Backdoor/results/test/drupe',  # 输出目录
-    'experiment_id': 'in1002in100_trigger-size-50_6000samples',       # 实验ID
+    'output_dir': '',  # 输出目录
+    'experiment_id': '',       # 实验ID
 } 
