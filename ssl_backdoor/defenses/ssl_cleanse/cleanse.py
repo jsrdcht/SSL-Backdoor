@@ -203,11 +203,14 @@ def run_ssl_cleanse(args, suspicious_model, suspicious_dataset, clean_test_datas
         logging.warning(f"未知数据集 {args.dataset_name}，使用默认归一化参数")
 
     # 创建初始数据加载器
+    # 注意：当 ratio < 1.0 时，我们对子集进行聚类与检测，因此后续需要将
+    # 子集索引（0 ~ subset_size-1）映射回原始数据集索引。
+    subset_indices = None
     if args.ratio < 1.0:
         # 随机采样数据集
         total_size = len(suspicious_dataset)
-        indices = torch.randperm(total_size)[:int(total_size * args.ratio)]
-        subset = torch.utils.data.Subset(suspicious_dataset, indices)
+        subset_indices = torch.randperm(total_size)[:int(total_size * args.ratio)]
+        subset = torch.utils.data.Subset(suspicious_dataset, subset_indices)
         suspicious_dataloader = DataLoader(subset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True)
     else:
         suspicious_dataloader = DataLoader(suspicious_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True)
@@ -250,8 +253,8 @@ def run_ssl_cleanse(args, suspicious_model, suspicious_dataset, clean_test_datas
                    f"总样本数: {sum(counts_label.values())}")
 
         # 计算聚类中心
-        rep_center = torch.empty((len(np.unique(y)), rep.shape[1]))
-        y_center = torch.empty(len(np.unique(y)))
+        rep_center = torch.empty((len(np.unique(y)), rep.shape[1]), device=rep.device)
+        y_center = torch.empty(len(np.unique(y)), device=rep.device)
         
         for label in np.unique(y):
             rep_center[label, :] = rep[y == label].mean(dim=0)
@@ -443,12 +446,17 @@ def run_ssl_cleanse(args, suspicious_model, suspicious_dataset, clean_test_datas
     anomaly_index = torch.argmin(reg_best_list).item()
     logging.info(f'检测到的异常聚类: {anomaly_index}')
 
-    # 将属于异常聚类的样本标记为有毒样本
+    # 将属于异常聚类的样本标记为有毒样本（当前索引基于“聚类/子集”的索引空间）
     is_poisoned = (torch.tensor(y) == anomaly_index)
     poisoned_indices = np.where(is_poisoned)[0].tolist()
     clean_indices = np.where(~is_poisoned)[0].tolist()
+
+    # 如果使用了子采样（ratio < 1.0），则需要将子集索引映射回原始数据集索引
+    if subset_indices is not None:
+        poisoned_indices = subset_indices[poisoned_indices].tolist()
+        clean_indices = subset_indices[clean_indices].tolist()
     
-    logging.info(f'检测到 {len(poisoned_indices)} 个潜在有毒样本 ({len(poisoned_indices) / len(y) * 100:.2f}%)')
+    logging.info(f'检测到 {len(poisoned_indices)} 个潜在有毒样本 ({len(poisoned_indices) / len(rep) * 100:.2f}%)')
     
     # 如果有测试数据集，评估检测性能
     evaluation_results = {}
