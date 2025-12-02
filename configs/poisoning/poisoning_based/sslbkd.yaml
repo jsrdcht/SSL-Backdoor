@@ -2,7 +2,7 @@ attack_algorithm: sslbkd
 data: data/ImageNet-100/trainset.txt
 dataset: imagenet100
 save_poisons: True
-# poisons_saved_path: /workspace/SSL-Backdoor/results/test/simsiam_imagenet-100_test/poisons
+# poisons_saved_path: 
 
 keep_poison_class: False
 attack_target_list:

@@ -7,10 +7,10 @@ BadEncoder: 一种针对自监督学习编码器的后门攻击实现
 
 # 基本配置
 config = {
-    'experiment_id': 'imagenet100_trigger-size-50',            # 实验ID
+    'experiment_id': '',            # 实验ID
     # 模型参数
     'arch': 'resnet18',                       # 编码器架构
-    'pretrained_encoder': '/workspace/SSL-Backdoor/ssl_backdoor/attacks/drupe/DRUPE/clean_encoder/model_1000.pth',  # 预训练编码器路径
+    'pretrained_encoder': '',  # 预训练编码器路径
     'encoder_usage_info': 'imagenet',          # 编码器使用信息，用于确定加载的模型
     'batch_size': 64,                        # 批处理大小 default: 256
     'num_workers': 4,                         # 数据加载进程数
@@ -25,9 +25,7 @@ config = {
     'shadow_dataset': 'imagenet100',
     'shadow_file': 'data/ImageNet-100/10percent_trainset.txt',
     'shadow_fraction': 0.2, # default: 0.2
-    # reference data 相关参数
-    # 'reference_file': 'assets/references/drupe_gtsrb_l12_n3/references.txt', # reference data configuration file
-    'reference_file': '/workspace/SSL-Backdoor/assets/references/imagenet/references.txt',
+    'reference_file': 'assets/references/imagenet/references.txt',
     
     'n_ref': 3,                               # 参考输入数量
     'downstream_dataset': 'imagenet100',
@@ -56,6 +54,6 @@ config = {
     
     # 系统参数
     'seed': 42,                               # 随机种子
-    'output_dir': '/workspace/SSL-Backdoor/results/test/badencoder',  # 输出目录
+    'output_dir': '',  # 输出目录
     
 } 
