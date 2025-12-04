@@ -17,12 +17,15 @@ from abc import abstractmethod
 from torch.utils import data
 
 from .corruptencoder_utils import *
-from .agent import CTRLPoisoningAgent, AdaptivePoisoningAgent
-from .utils import concatenate_images, attr_exists, attr_is_true, load_image
+from .agent import CTRLPoisoningAgent, AdaptivePoisoningAgent, ExternalServicePoisoningAgent
+from .utils import concatenate_images, attr_exists, attr_is_true, load_image, add_watermark, split_resize_transforms
 
 from .base import TriggerBasedPoisonedTrainDataset
 from .hidden import *
 from .var import dataset_params
+
+# 兼容不同Pillow版本的双线性插值常量
+RESAMPLE_BILINEAR = getattr(Image, 'BILINEAR', 2)
 
     
 
@@ -42,7 +45,7 @@ class FileListDataset(data.Dataset):
         if self.transform is not None:
             img = self.transform(img)
 
-        if hasattr(self, 'rich_output') and self.rich_output:
+        if bool(getattr(self, 'rich_output', False)):
             return {'img_path': image_path, 'img': img, 'target': target, 'idx': idx}
         else:
             return img, target
@@ -305,14 +308,13 @@ class CorruptEncoderTrainDataset(TriggerBasedPoisonedTrainDataset):
 
 class BltoPoisoningPoisonedTrainDataset(TriggerBasedPoisonedTrainDataset):
     def __init__(self, args, path_to_txt_file, transform):
-
         self.poisoning_agent = AdaptivePoisoningAgent(args)
-
         super(BltoPoisoningPoisonedTrainDataset, self).__init__(args, path_to_txt_file, transform)
         
     
     def apply_poison(self, image, trigger):
         return self.poisoning_agent.apply_poison(image)
+
 
 class SSLBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
     def __init__(self, args, path_to_txt_file, transform):
@@ -320,15 +322,27 @@ class SSLBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
 
         
     def apply_poison(self, image, trigger):
-        triggered_img = add_watermark(image, trigger, watermark_width=self.args.trigger_size,
-                                    position='random',
-                                    location_min=0.25,
-                                    location_max=0.75,
+        triggered_img = add_watermark(image, trigger, watermark_width=self.trigger_size,
+                                    position=self.position,
+                                    location_min=self.location_min,
+                                    location_max=self.location_max,
                                     alpha_composite=True,
+                                    alpha=self.alpha,
                                     return_location=False,
                                     mode=self.trigger_insert)
         
         return triggered_img
+
+
+class ExternalBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
+    def __init__(self, args, path_to_txt_file, transform):
+        # 使用外部HTTP服务投毒
+        self.agent = ExternalServicePoisoningAgent(args)
+        super(ExternalBackdoorTrainDataset, self).__init__(args, path_to_txt_file, transform)
+
+    def apply_poison(self, image, trigger):
+        # 忽略本地 trigger，转而调用外部服务
+        return self.agent.apply_poison(image)
 
 
 
@@ -345,12 +359,16 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
 
         self.args = args
         self.transform = transform
+        self.resize_transform, self.other_transform = split_resize_transforms(transform)
         self.return_attack_target = getattr(self.args, 'return_attack_target', False)
         self.attack_target = self.args.attack_target
         self.img_size = dataset_params[self.args.dataset]['image_size']
 
+        # 初始化可选的预先 resize 参数
+        self.pre_resize = getattr(self.args, 'pre_resize', False)
+        self.pre_resize_size = getattr(self.args, 'pre_resize_size', None)
 
-        # 如果使用 CTRL 攻击算法，初始化对应的代理
+        # 如果有对应的代理
         if self.args.attack_algorithm == 'ctrl':
             self.agent = CTRLPoisoningAgent(self.args)
         elif self.args.attack_algorithm == 'blto':
@@ -360,6 +378,8 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         elif self.args.attack_algorithm == 'badclip':
             from .agent import BadCLIPPoisoningAgent
             self.agent = BadCLIPPoisoningAgent(args)
+        elif self.args.attack_algorithm == 'external_backdoor':
+            self.agent = ExternalServicePoisoningAgent(self.args)
         else:
             print(f"No agent for OnlineUniversalPoisonedValDataset: {self.args.attack_algorithm}")
 
@@ -369,7 +389,7 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
             self.location_max = getattr(self.args, 'location_max', 0.85)
             self.trigger_insert = getattr(self.args, 'trigger_insert', 'patch')
             self.position = getattr(self.args, 'position', 'random')
-            self.alpha = getattr(self.args, 'alpha', 0.0)
+            self.alpha = getattr(self.args, 'alpha', 0.2)
 
 
         # 初始化投毒样本索引
@@ -386,6 +406,13 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
 
     def apply_poison(self, img):
         """对图像进行投毒处理"""
+        # 如果启用了预处理 resize，则先调整图像大小
+        if getattr(self, 'pre_resize', False) and self.pre_resize_size is not None:
+            if isinstance(self.pre_resize_size, (list, tuple)):
+                img = img.resize(tuple(self.pre_resize_size), RESAMPLE_BILINEAR)
+            else:
+                img = img.resize((self.pre_resize_size, self.pre_resize_size), RESAMPLE_BILINEAR)
+
         if hasattr(self, 'agent'):
             return self.agent.apply_poison(img)
         elif self.args.attack_algorithm == 'optimized':
@@ -405,33 +432,20 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
             return poisoned_img
         elif self.args.attack_algorithm == 'clean':
             return img
-        elif self.args.attack_algorithm == 'badencoder':
-            img = img.resize((self.img_size, self.img_size), Image.BILINEAR)
-            return add_watermark(
-                    img,
-                    self.args.trigger_path,
-                    watermark_width=self.args.trigger_size,
-                    position=self.position,
-                    location_min=self.location_min,
-                    location_max=self.location_max,
-                    alpha_composite=True,
-                    alpha=self.alpha,
-                    return_location=False,
-                    mode=self.trigger_insert
-                )
         else:
+            # 支持基于参数的多种插入方式：watermark 或 refool
             return add_watermark(
-                    img,
-                    self.args.trigger_path,
-                    watermark_width=self.args.trigger_size,
-                    position=self.position,
-                    location_min=self.location_min,
-                    location_max=self.location_max,
-                    alpha_composite=True,
-                    alpha=self.alpha,
-                    return_location=False,
-                    mode=self.trigger_insert
-                )
+                img,
+                self.args.trigger_path,
+                watermark_width=self.args.trigger_size,
+                position=self.position,
+                location_min=self.location_min,
+                location_max=self.location_max,
+                alpha_composite=True,
+                alpha=self.alpha,
+                return_location=False,
+                mode=self.trigger_insert
+            )
 
     def inject_trigger_to_all_samples(self):
         """将触发器直接应用于所有图像，并保存数据集"""
@@ -450,6 +464,10 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
                 
                 # 在预植入模式下，对每个图像进行投毒
                 img = self.apply_poison(img)
+                if isinstance(img, tuple):
+                    img, _ = img
+                if not isinstance(img, Image.Image):
+                    raise ValueError("apply_poison 必须返回 PIL.Image 或 (PIL.Image, extra)")
                 
                 # 保存投毒后的图像
                 poisoned_img_path = os.path.join(poisoned_dataset_path, f"poisoned_img_{idx}.png")
@@ -467,14 +485,21 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         img = Image.open(image_path).convert('RGB')
         target = int(self.file_list[idx].split()[1]) if not self.return_attack_target else self.attack_target
 
+        # 先做 resize 操作
+        if self.resize_transform is not None:
+            img = self.resize_transform(img)
+
         # 在加载时对图像进行投毒
         if not self.pre_inject_mode and idx in self.poison_idxs:
             img = self.apply_poison(img)
+            if isinstance(img, tuple):
+                img, _ = img
 
-        if self.transform is not None:
-            img = self.transform(img)
+        # 再做其它 transform 操作
+        if self.other_transform is not None:
+            img = self.other_transform(img)
 
-        if hasattr(self, 'rich_output') and self.rich_output:
+        if bool(getattr(self, 'rich_output', False)):
             return {'img_path': image_path, 'img': img, 'target': target, 'idx': idx}
         else:
             return img, target
