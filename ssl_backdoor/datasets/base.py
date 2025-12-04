@@ -26,12 +26,14 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
         self.args = args
         self.transform = transform
         self.trigger_size = getattr(args, 'trigger_size', None)
+        # 统一在基类中初始化通用插入方式与透明度，子类可覆盖但至少不会缺失
+        self.trigger_insert = getattr(args, 'trigger_insert', 'patch')
+        self.alpha = getattr(args, 'alpha', 0.2)
         self.save_poisons: bool = True if hasattr(self.args, 'save_poisons') and self.args.save_poisons else False
         self.save_poisons_path = None if not self.save_poisons else os.path.join(self.args.save_folder, 'poisons')
-        if attr_exists(self.args, 'save_poisons_path'): 
+        if attr_exists(self.args, 'save_poisons_path'):
             self.save_poisons_path = self.args.save_poisons_path
         self.poisons_saved_path = getattr(args, 'poisons_saved_path', None)
-        self.trigger_insert = getattr(args, 'trigger_insert', 'patch')
 
         assert attr_exists(self, "save_poisons_path") or attr_exists(self, "poisons_saved_path"), "save_poisons_path must be set"
 
