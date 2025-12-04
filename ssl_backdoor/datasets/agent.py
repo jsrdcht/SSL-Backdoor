@@ -5,6 +5,9 @@ from .generators import GeneratorResnet
 
 from scipy.fftpack import dct, idct
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageColor
+import io
+import zipfile
+import requests
 
 class CTRLPoisoningAgent():
     def __init__(self, args):
@@ -258,4 +261,72 @@ class BadCLIPPoisoningAgent:
         else:
             raise ValueError(f"Unsupported mode: {self.mode}")
         
+
+class ExternalServicePoisoningAgent:
+    """
+    通过外部HTTP服务对图像进行投毒/植入。
+
+    约定：
+    - 服务接受multipart/form-data：字段名为 'files'（单文件）以及可选的表单字段，如 'secret'。
+    - 若仅上传一张图片，服务直接返回PNG字节流；若多张图片，可能返回zip。
+    - 示例服务可参考 `StegaStamp-pytorch/stegastamp/server.py` 的 /encode 接口。
+    """
+
+    def __init__(self, args):
+        self.args = args
+        # 读取服务参数（优先外部命名，其次通用命名）
+        self.service_url = getattr(args, 'external_service_url', None) or getattr(args, 'service_url', None)
+        if not self.service_url:
+            raise ValueError("external_service_url 未设置，无法调用外部服务进行投毒")
+
+        # 对于StegaStamp示例服务，使用 `secret` 文本参数
+        self.secret = getattr(args, 'external_secret', getattr(args, 'secret', 'Stega!!'))
+        self.timeout = getattr(args, 'external_timeout', 30)
+
+        # 规范化编码端点，缺失时默认追加 /encode
+        base = self.service_url.rstrip('/')
+        if base.endswith('/encode'):
+            self.encode_url = base
+        else:
+            self.encode_url = f"{base}/encode"
+
+    def _image_to_bytes(self, image):
+        if isinstance(image, str):
+            img = Image.open(image).convert('RGB')
+        elif isinstance(image, Image.Image):
+            img = image.convert('RGB')
+        else:
+            raise ValueError("image 必须是图像路径或 PIL.Image")
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        return buf.getvalue()
+
+    def _bytes_to_image(self, raw_bytes):
+        return Image.open(io.BytesIO(raw_bytes)).convert('RGB')
+
+    def apply_poison(self, image):
+        img_bytes = self._image_to_bytes(image)
+        files = {
+            'files': ('image.png', img_bytes, 'image/png')
+        }
+        data = {
+            'secret': self.secret
+        }
+
+        resp = requests.post(self.encode_url, files=files, data=data, timeout=self.timeout)
+        resp.raise_for_status()
+
+        content_type = resp.headers.get('Content-Type', '')
+        content = resp.content
+        if 'application/zip' in content_type:
+            with zipfile.ZipFile(io.BytesIO(content), 'r') as zf:
+                names = zf.namelist()
+                if len(names) == 0:
+                    raise RuntimeError('外部服务返回空zip文件')
+                with zf.open(names[0]) as f:
+                    content = f.read()
+
+        return self._bytes_to_image(content)
+
         
