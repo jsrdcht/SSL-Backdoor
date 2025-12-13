@@ -16,12 +16,11 @@ from abc import abstractmethod
 
 from torch.utils import data
 
-from .corruptencoder_utils import *
-from .agent import CTRLPoisoningAgent, AdaptivePoisoningAgent, ExternalServicePoisoningAgent
+from .attacker.corruptencoder_utils import *
+from .attacker.agent import CTRLPoisoningAgent, AdaptivePoisoningAgent, ExternalServicePoisoningAgent
 from .utils import concatenate_images, attr_exists, attr_is_true, load_image, add_watermark, split_resize_transforms
 
 from .base import TriggerBasedPoisonedTrainDataset
-from .hidden import *
 from .var import dataset_params
 
 # 兼容不同Pillow版本的双线性插值常量
@@ -68,7 +67,7 @@ class CTRLTrainDataset(TriggerBasedPoisonedTrainDataset):
         return self.agent.apply_poison(image)
     
     def generate_poisoned_data(self, poison_info: 'list[dict]') -> List[str]:
-        """Generate poisoned dataset and visualize DCT domain differences."""
+        """Generate poisoned dataset."""
         poison_index = 0
         poison_list = []
 
@@ -85,96 +84,6 @@ class CTRLTrainDataset(TriggerBasedPoisonedTrainDataset):
 
                 poisoned_image.save(save_path)
                 poison_list.append(f"{save_path} {target_class}")
-
-        # Randomly select an image for DCT domain comparison
-        random_poison_info = random.choice(poison_info)
-        random_poison_path = random.choice(random_poison_info['reference_paths'])
-        trigger_path = random_poison_info['trigger_path']
-
-        # Load original and poisoned images
-        original_image = Image.open(random_poison_path).convert('RGB')
-        poisoned_image = self.apply_poison(image=random_poison_path, trigger=trigger_path)
-
-        original_image_np = np.array(original_image)
-        poisoned_image_np = np.array(poisoned_image)
-
-        # Convert images to YUV color space
-        original_yuv = self.agent.rgb_to_yuv(original_image_np)
-        poisoned_yuv = self.agent.rgb_to_yuv(poisoned_image_np)
-
-        # Prepare arrays for DCT coefficients
-        original_dct = np.zeros_like(original_yuv)
-        poisoned_dct = np.zeros_like(poisoned_yuv)
-
-        height, width, _ = original_yuv.shape
-        window_size = self.agent.window_size
-
-        # Compute DCT coefficients in windows for channels in channel_list
-        for ch in self.agent.channel_list:
-            for w in range(0, height - height % window_size, window_size):
-                for h in range(0, width - width % window_size, window_size):
-                    # Original image DCT
-                    orig_block = original_yuv[w:w + window_size, h:h + window_size, ch]
-                    orig_dct_block = self.agent.dct_2d(orig_block, norm='ortho')
-                    original_dct[w:w + window_size, h:h + window_size, ch] = orig_dct_block
-
-                    # Poisoned image DCT
-                    poison_block = poisoned_yuv[w:w + window_size, h:h + window_size, ch]
-                    poison_dct_block = self.agent.dct_2d(poison_block, norm='ortho')
-                    poisoned_dct[w:w + window_size, h:h + window_size, ch] = poison_dct_block
-
-        # Compute difference in DCT domain for the specified channels
-        dct_diff = np.zeros_like(original_dct)
-        for ch in self.agent.channel_list:
-            dct_diff[:, :, ch] = np.abs(poisoned_dct[:, :, ch] - original_dct[:, :, ch])
-        
-        # Print positions where dct_diff is not zero and their values
-        non_zero_indices = np.argwhere(dct_diff > 10)
-        for idx in non_zero_indices:
-            w, h, ch = idx
-            value = dct_diff[w, h, ch]
-            print(f">10 DCT difference at position ({w}, {h}, channel {ch}): {value}")
-
-        # Normalize and convert to uint8 for visualization
-        def normalize_and_convert(img_array):
-            min_val = np.min(img_array)
-            max_val = np.max(img_array)
-            normalized = (img_array - min_val) / (max_val - min_val + 1e-8)
-            normalized = (normalized * 255).astype(np.uint8)
-            return normalized
-
-        # Prepare visualization images
-        original_dct_vis = normalize_and_convert(original_dct)
-        poisoned_dct_vis = normalize_and_convert(poisoned_dct)
-        diff_dct_vis = normalize_and_convert(dct_diff)
-
-        # Convert arrays to images
-        original_dct_image = Image.fromarray(original_dct_vis, mode='RGB')
-        poisoned_dct_image = Image.fromarray(poisoned_dct_vis, mode='RGB')
-        diff_image = Image.fromarray(diff_dct_vis, mode='RGB')
-
-        # Ensure images have the same size
-        min_width = min(original_dct_image.width, poisoned_dct_image.width, diff_image.width)
-        min_height = min(original_dct_image.height, poisoned_dct_image.height, diff_image.height)
-        original_dct_image = original_dct_image.resize((min_width, min_height))
-        poisoned_dct_image = poisoned_dct_image.resize((min_width, min_height))
-        diff_image = diff_image.resize((min_width, min_height))
-
-        # Save diff image
-        diff_image_path = os.path.join(self.temp_path, 'diff.png')
-        diff_image.save(diff_image_path)
-        print(f"DCT domain difference image saved to {diff_image_path}")
-
-        # Create side-by-side comparison image
-        compare_width = min_width * 2
-        compare_image = Image.new('RGB', (compare_width, min_height))
-        compare_image.paste(original_dct_image, (0, 0))
-        compare_image.paste(poisoned_dct_image, (min_width, 0))
-
-        # Save comparison image
-        compare_image_path = os.path.join(self.temp_path, 'compare.png')
-        compare_image.save(compare_image_path)
-        print(f"DCT domain comparison image saved to {compare_image_path}")
 
         return poison_list
 
@@ -314,18 +223,10 @@ class BltoPoisoningPoisonedTrainDataset(TriggerBasedPoisonedTrainDataset):
     def apply_poison(self, image, trigger):
         return self.poisoning_agent.apply_poison(image)
 
-class BltoPoisoningPoisonedTrainDataset(TriggerBasedPoisonedTrainDataset):
-    def __init__(self, args, path_to_txt_file, transform):
-        self.poisoning_agent = AdaptivePoisoningAgent(args)
-        super(BltoPoisoningPoisonedTrainDataset, self).__init__(args, path_to_txt_file, transform)
-        
-    
-    def apply_poison(self, image, trigger):
-        return self.poisoning_agent.apply_poison(image)
-
 
 class SSLBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
     def __init__(self, args, path_to_txt_file, transform):
+
         # 提前初始化 apply_poison 所需的配置字段，避免在父类 __init__ 中调用 apply_poison 时发生 AttributeError
         # 这里直接使用传入的 args，而不是依赖父类先设置 self.args
         self.args = args
@@ -335,6 +236,7 @@ class SSLBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
 
         super(SSLBackdoorTrainDataset, self).__init__(args, path_to_txt_file, transform)
 
+        
     def apply_poison(self, image, trigger):
         triggered_img = add_watermark(image, trigger, watermark_width=self.trigger_size,
                                     position=self.position,
@@ -361,9 +263,6 @@ class ExternalBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
 
 
 
-
-
-    
 class OnlineUniversalPoisonedValDataset(data.Dataset):
     def __init__(self, args, path_to_txt_file, transform, pre_inject_mode=False):
         # 读取文件列表
@@ -390,7 +289,7 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
             args.device = 'cpu'
             self.agent = AdaptivePoisoningAgent(args)
         elif self.args.attack_algorithm == 'badclip':
-            from .agent import BadCLIPPoisoningAgent
+            from .attacker.agent import BadCLIPPoisoningAgent
             self.agent = BadCLIPPoisoningAgent(args)
         elif self.args.attack_algorithm == 'external_backdoor':
             self.agent = ExternalServicePoisoningAgent(self.args)
@@ -405,6 +304,7 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         self.trigger_insert = getattr(self.args, 'trigger_insert', 'patch')
         self.position = getattr(self.args, 'position', 'random')
         self.alpha = getattr(self.args, 'alpha', 0.2)
+        self.attack_algorithm = getattr(self.args, 'attack_algorithm', None)
 
 
         # 初始化投毒样本索引
@@ -430,23 +330,10 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
 
         if hasattr(self, 'agent'):
             return self.agent.apply_poison(img)
-        elif self.args.attack_algorithm == 'optimized':
-            if not hasattr(self, 'delta_np'):
-                ckpt_state = torch.load(self.args.trigger_path, map_location="cpu")
-                delta = ckpt_state['model']['delta']
-                delta = delta.mean(0).permute(1, 2, 0)
-                delta = delta * 255 * (16 / 255)
-                self.delta_np = delta.cpu().numpy()
-
-            img = img.resize(self.delta_np.shape[:2])
-            image_np = np.array(img)
-
-            poisoned_img = (image_np + self.delta_np).clip(0, 255).astype(np.uint8)
-            poisoned_img = Image.fromarray(poisoned_img)
-            poisoned_img.convert('RGB')
-            return poisoned_img
-        elif self.args.attack_algorithm == 'clean':
+        elif self.attack_algorithm == 'clean':
             return img
+        elif self.attack_algorithm == 'optimized':
+            raise ValueError("optimized attack algorithm is not supported for OnlineUniversalPoisonedValDataset")
         else:
             # 支持基于参数的多种插入方式：watermark 或 refool
             return add_watermark(
@@ -464,12 +351,12 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
 
     def inject_trigger_to_all_samples(self):
         """将触发器直接应用于所有图像，并保存数据集"""
-        poisoned_dataset_path = "/workspace/SSL-Backdoor/data/tmp/offline-poisons"
+        poisoned_dataset_path = "tmp/offline-poisons"
         if not os.path.exists(poisoned_dataset_path):
             os.makedirs(poisoned_dataset_path)
 
         # 新文件路径，用于保存更新后的配置文件
-        poisoned_file_list_path = "/workspace/SSL-Backdoor/data/tmp/poisoned_file_list.txt"
+        poisoned_file_list_path = "tmp/poisoned_file_list.txt"
 
         # 逐个处理图像并保存
         with open(poisoned_file_list_path, 'w') as f:

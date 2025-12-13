@@ -31,9 +31,13 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
         self.alpha = getattr(args, 'alpha', 0.2)
         self.save_poisons: bool = True if hasattr(self.args, 'save_poisons') and self.args.save_poisons else False
         self.save_poisons_path = None if not self.save_poisons else os.path.join(self.args.save_folder, 'poisons')
-        if attr_exists(self.args, 'save_poisons_path'):
+        if attr_exists(self.args, 'save_poisons_path'): 
             self.save_poisons_path = self.args.save_poisons_path
         self.poisons_saved_path = getattr(args, 'poisons_saved_path', None)
+        # 新增属性，用于控制水印位置、范围、透明度
+        self.position = getattr(args, 'position', 'random')
+        self.location_min = getattr(args, 'location_min', 0.25)
+        self.location_max = getattr(args, 'location_max', 0.75)
 
         assert attr_exists(self, "save_poisons_path") or attr_exists(self, "poisons_saved_path"), "save_poisons_path must be set"
 
@@ -49,9 +53,12 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
 
 
         self.poison_info = []
-        for attack_target, trigger_path, attack_dataset, num_reference, num_poison in zip(self.attack_target_list, self.trigger_path_list, self.reference_dataset_file_list, self.num_reference_list, self.num_reference_list):
-            if not os.path.exists(trigger_path):
-                raise FileNotFoundError(f"Trigger file not found: {trigger_path}")
+        algo = getattr(self.args, 'attack_algorithm', '')
+        for attack_target, trigger_path, attack_dataset, num_reference, num_poison in zip(self.attack_target_list, self.trigger_path_list, self.reference_dataset_file_list, self.num_reference_list, self.num_poison_list):
+            # external_backdoor 可能不需要本地触发器文件
+            if algo != 'external_backdoor':
+                if not os.path.exists(trigger_path):
+                    raise FileNotFoundError(f"Trigger file not found: {trigger_path}")
             if not os.path.exists(attack_dataset):
                 raise FileNotFoundError(f"Attack dataset file not found: {attack_dataset}")
 
@@ -167,8 +174,13 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
             else:
                 target_class = int(target_class)
             
+            # 采样策略：
+            # - 当 num_poison 大于可用参考数时，进行有放回采样扩增到 num_poison 个
+            # - 当 num_poison 小于等于可用参考数时，进行无放回采样截断到 num_poison 个
             if num_poison > len(reference_paths):
-                reference_paths = random.choice(reference_paths, k = num_poison)
+                reference_paths = random.choices(reference_paths, k=num_poison)
+            else:
+                reference_paths = random.sample(reference_paths, num_poison)
 
             for path in reference_paths:
                 poisoned_image = self.apply_poison(image=path, trigger=trigger_path)

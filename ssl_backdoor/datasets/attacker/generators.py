@@ -16,6 +16,7 @@ from torch.autograd import Variable
 # To control feature map in generator
 ngf = 64
 
+
 class GeneratorResnet(nn.Module):
     def __init__(self, inception=False, dim="high"):
         '''
@@ -60,7 +61,6 @@ class GeneratorResnet(nn.Module):
         else:
             print("I'm under low dim module!")
 
-
         # Input size = 3, n/4, n/4
         self.upsampl1 = nn.Sequential(
             nn.ConvTranspose2d(ngf * 4, ngf * 2, kernel_size=3, stride=2, padding=1, output_padding=1, bias=False),
@@ -81,11 +81,9 @@ class GeneratorResnet(nn.Module):
             nn.Conv2d(ngf, 3, kernel_size=7, padding=0)
         )
 
-
         self.crop = nn.ConstantPad2d((0, -1, -1, 0), 0)
 
     def forward(self, input):
-
         x = self.block1(input)
         x = self.block2(x)
         x = self.block3(x)
@@ -102,7 +100,7 @@ class GeneratorResnet(nn.Module):
         if self.inception:
             x = self.crop(x)
 
-        return (torch.tanh(x) + 1) / 2 # Output range [0 1]
+        return (torch.tanh(x) + 1) / 2  # Output range [0 1]
 
 
 class GeneratorAdv(nn.Module):
@@ -118,7 +116,7 @@ class GeneratorAdv(nn.Module):
 
     def forward(self, input):
         # perturbation = (torch.tanh(self.perturbation) + 1) / 2
-        return input + self.perturbation * self.eps # Output range [0 1]
+        return input + self.perturbation * self.eps  # Output range [0 1]
 
 
 class Generator_Patch(nn.Module):
@@ -136,7 +134,7 @@ class Generator_Patch(nn.Module):
         random_x = np.random.randint(0, input.shape[-1] - self.perturbation.shape[-1])
         random_y = np.random.randint(0, input.shape[-1] - self.perturbation.shape[-1])
         input[:, :, random_x:random_x + self.perturbation.shape[-1], random_y:random_y + self.perturbation.shape[-1]] = self.perturbation
-        return input # Output range [0 1]
+        return input  # Output range [0 1]
 
 
 class ResidualBlock(nn.Module):
@@ -144,22 +142,19 @@ class ResidualBlock(nn.Module):
         super(ResidualBlock, self).__init__()
         self.block = nn.Sequential(
             nn.ReflectionPad2d(1),
-            nn.Conv2d(in_channels=num_filters, out_channels=num_filters, kernel_size=3, stride=1, padding=0,
-                      bias=False),
+            nn.Conv2d(in_channels=num_filters, out_channels=num_filters, kernel_size=3, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(num_filters),
             nn.ReLU(True),
-
             nn.Dropout(0.5),
-
             nn.ReflectionPad2d(1),
-            nn.Conv2d(in_channels=num_filters, out_channels=num_filters, kernel_size=3, stride=1, padding=0,
-                      bias=False),
+            nn.Conv2d(in_channels=num_filters, out_channels=num_filters, kernel_size=3, stride=1, padding=0, bias=False),
             nn.BatchNorm2d(num_filters)
         )
 
     def forward(self, x):
         residual = self.block(x)
         return x + residual
+
 
 if __name__ == '__main__':
     netG = GeneratorResnet()
