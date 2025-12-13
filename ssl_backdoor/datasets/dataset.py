@@ -332,6 +332,8 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
             return self.agent.apply_poison(img)
         elif self.attack_algorithm == 'clean':
             return img
+        elif self.attack_algorithm == 'optimized':
+            raise ValueError("optimized attack algorithm is not supported for OnlineUniversalPoisonedValDataset")
         else:
             # 支持基于参数的多种插入方式：watermark 或 refool
             return add_watermark(
