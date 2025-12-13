@@ -17,7 +17,7 @@ from torchvision import datasets, transforms
 
 from ssl_backdoor.datasets.dataset import FileListDataset
 from ssl_backdoor.datasets import dataset_params
-from ssl_backdoor.datasets.agent import BadEncoderPoisoningAgent
+from ssl_backdoor.datasets.attacker.agent import BadEncoderPoisoningAgent
 from ssl_backdoor.datasets.utils import add_watermark
 from ssl_backdoor.attacks.badencoder.datasets import BadEncoderDataset
 from ssl_backdoor.attacks.badencoder.datasets import get_poisoning_dataset
