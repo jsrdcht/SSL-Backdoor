@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import warnings
 
 from .generators import GeneratorResnet
 
@@ -9,26 +10,25 @@ import io
 import zipfile
 import requests
 
+
 class CTRLPoisoningAgent():
     def __init__(self, args):
         self.args = args
-        self.channel_list = [1,2]
+        self.channel_list = [1, 2]
         self.window_size = getattr(args, 'window_size', 32)
-        self.pos_list = [(15,15), (31,31)]
-        self.magnitude = getattr(args, 'attack_magnitude', 50) # although the default value is 50 in CTRL paper, it is recommended to use 100 in their github repo
-
+        self.pos_list = [(15, 15), (31, 31)]
+        self.magnitude = getattr(args, 'attack_magnitude', 50)  # although the default value is 50 in CTRL paper, it is recommended to use 100 in their github repo
 
         self.lindct = False
 
-
     def apply_poison(self, img):
         assert isinstance(img, Image.Image), "Input must be a PIL image"
-        
+
         img_mode = img.mode
         img = img.convert('RGB')
-        
+
         img, (height, width, _) = np.array(img), np.array(img).shape
-        
+
         img = self.rgb_to_yuv(img)
 
         valid_height = height - height % self.window_size
@@ -42,22 +42,20 @@ class CTRLPoisoningAgent():
             for w in range(0, dct_img.shape[0], self.window_size):
                 for h in range(0, dct_img.shape[1], self.window_size):
                     for pos in self.pos_list:
-                        dct_img[w+pos[0], h+pos[1],ch] = dct_img[w+pos[0], h+pos[1],ch] + self.magnitude
-            
+                        dct_img[w + pos[0], h + pos[1], ch] = dct_img[w + pos[0], h + pos[1], ch] + self.magnitude
 
-        #transfer to time domain
+        # transfer to time domain
         idct_img = self.IDCT(dct_img)
 
         img[:valid_height, :valid_width, :] = idct_img
         # 确保数据类型为uint8，以兼容PIL图像格式
-        
+
         img = self.yuv_to_rgb(img)
         img = np.uint8(np.clip(img, 0, 255))
         img = Image.fromarray(img)  # 将数组转回PIL图像
         img = img.convert(img_mode)
 
         return img
-
 
     def rgb_to_yuv(self, img):
         """
@@ -80,7 +78,6 @@ class CTRLPoisoningAgent():
         B = Y + 2.03211 * U
         rgb_img = np.stack((R, G, B), axis=-1)
         return rgb_img
-    
 
     def DCT(self, x):
         """
@@ -102,7 +99,7 @@ class CTRLPoisoningAgent():
         X1 = dct(x, norm=norm, axis=0)
         X2 = dct(X1, norm=norm, axis=1)
         return X2
-    
+
     def IDCT(self, dct_image):
         """
         Apply 2D IDCT on a numpy array containing DCT coefficients in windows of specified size.
@@ -125,14 +122,14 @@ class CTRLPoisoningAgent():
         x1 = idct(X, norm=norm, axis=1)
         x2 = idct(x1, norm=norm, axis=0)
         return x2
-    
+
+
 class AdaptivePoisoningAgent():
     def __init__(self, args):
         self.args = args
         self.device = args.device
         self.net_G = GeneratorResnet().to(self.device)
         self.net_G.load_state_dict(torch.load(args.generator_path, map_location='cpu')["state_dict"], strict=True)
-
 
     @torch.no_grad()
     def apply_generatorG(self, netG, img, eps=8/255, eval_G=True):
@@ -147,11 +144,10 @@ class AdaptivePoisoningAgent():
             adv = torch.clamp(adv, 0.0, 1.0)
         return adv
 
-    
     def apply_poison(self, image):
         if isinstance(image, str):
             image = Image.open(image).convert('RGB')
-    
+
         if 'imagenet' in self.args.dataset.lower():
             image = image.resize((224, 224))
 
@@ -162,19 +158,24 @@ class AdaptivePoisoningAgent():
         adv = (adv * 255).clip(0, 255).astype(np.uint8)
         adv = Image.fromarray(adv)
         return adv
-    
+
 
 class BadEncoderPoisoningAgent:
     def __init__(self, args):
-        print("BadEncoderPoisoningAgent is going to deprecated, please use add_watermark instead")
+        warnings.warn(
+            "BadEncoderPoisoningAgent is deprecated and will be removed in a future release. "
+            "Please use `ssl_backdoor.datasets.utils.add_watermark` (or the BadEncoderDataset path "
+            "in `ssl_backdoor.attacks.badencoder.datasets`) instead.",
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
         self.args = args
-        
+
         # vanilla badencoder
         trigger_data = np.load(args.trigger_file)
-        self.trigger, self.trigger_mask = trigger_data['t'], trigger_data['tm'] # shape为 (1, 32, 32, 3)
+        self.trigger, self.trigger_mask = trigger_data['t'], trigger_data['tm']  # shape为 (1, 32, 32, 3)
         self.trigger, self.trigger_mask = self.trigger.squeeze(), self.trigger_mask.squeeze()
         assert self.trigger.ndim == 3 or self.trigger.ndim == 4 and self.trigger_mask.shape[0] > 1
-
 
     def apply_poison(self, img: Image.Image) -> Image.Image:
         # vanilla badencoder
@@ -199,7 +200,7 @@ class BadEncoderPoisoningAgent:
         backdoored_img = Image.fromarray(backdoored_img)
 
         return backdoored_img
-    
+
 
 class BadCLIPPoisoningAgent:
     def __init__(self, args):
@@ -212,7 +213,6 @@ class BadCLIPPoisoningAgent:
         assert self.position in ['middle', 'random'], "position must be one of the following: middle, random"
         assert self.mode == 'ours_tnature' and self.position == 'middle', "only ours_tnature and middle position is supported for now"
 
-        
         # BadCLIP 的 trigger 植入是在连续空间中进行的，所以需要将 trigger 转换为连续空间
         if self.mode == 'ours_tnature':
             _trigger = Image.open(self.trigger_path).convert('RGB')
@@ -222,12 +222,10 @@ class BadCLIPPoisoningAgent:
             self.trigger = _trigger
         else:
             raise ValueError(f"Unsupported mode: {self.mode}")
-        
+
         self.image_size = 224
         print(f"set image_size={self.image_size} for badclip poisoning, it is fixed and cannot be changed. If your dataset image size is not 224, please change the image size manually.")
 
-        
-        
     def apply_poison(self, image):
         if isinstance(image, str):
             image = Image.open(image).convert('RGB')
@@ -243,24 +241,24 @@ class BadCLIPPoisoningAgent:
             # 获取图像和触发器尺寸
             img_h, img_w = image.shape[:2]
             trigger_h, trigger_w = trigger.shape[:2]
-            
+
             # 计算图像中心点
             c_h = int(img_h / 2)
             c_w = int(img_w / 2)
-            
+
             # 计算触发器左上角的位置
             s_h = int(c_h - trigger_h / 2)
             s_w = int(c_w - trigger_w / 2)
-            
+
             # 将触发器放在图像中间位置
-            image[s_h:s_h+trigger_h, s_w:s_w+trigger_w] = trigger
-            
+            image[s_h:s_h + trigger_h, s_w:s_w + trigger_w] = trigger
+
             # 转换回PIL图像
             image = (image * 255).astype(np.uint8)
             return Image.fromarray(image)
         else:
             raise ValueError(f"Unsupported mode: {self.mode}")
-        
+
 
 class ExternalServicePoisoningAgent:
     """
@@ -328,5 +326,3 @@ class ExternalServicePoisoningAgent:
                     content = f.read()
 
         return self._bytes_to_image(content)
-
-        
