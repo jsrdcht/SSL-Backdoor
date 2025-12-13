@@ -1,0 +1,31 @@
+attack_algorithm: corruptencoder
+data: data/ImageNet-100/trainset.txt
+dataset: imagenet100
+save_poisons: True
+
+
+attack_target_list:
+  - 6
+trigger_path_list:
+  - assets/triggers/trigger_14.png
+reference_dataset_file_list:
+  - data/ImageNet-100/trainset.txt
+num_reference_list:
+  - 650
+num_poison_list:
+  - 650
+
+
+trigger_size: 50
+
+support_ratio: 0.2
+background_dir: data/poisonencoder_utils/places
+reference_dir: assets/corruptencoder_reference/n01820546
+num_references: 3
+
+# usually not changed
+max_size: 800
+area_ratio: 2
+object_marginal: 0.05
+trigger_marginal: 0.25
+
