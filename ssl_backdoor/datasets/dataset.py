@@ -183,7 +183,7 @@ class CorruptEncoderTrainDataset(TriggerBasedPoisonedTrainDataset):
         # corruptencoder things
         self.support_ratio = args.support_ratio
         self.background_dir = args.background_dir
-        self.reference_dir = os.path.join(args.reference_dir)
+        self.reference_dir = args.reference_dir
         self.num_references = args.num_references
         self.max_size = args.max_size
         self.area_ratio = args.area_ratio
@@ -193,15 +193,6 @@ class CorruptEncoderTrainDataset(TriggerBasedPoisonedTrainDataset):
         super(CorruptEncoderTrainDataset, self).__init__(args, path_to_txt_file, transform)
     
     def generate_poisoned_data(self, poison_info: 'list[dict]') -> List[str]:
-        is_main_process = (not dist.is_initialized()) or (dist.get_rank() == 0)
-        print(f"main process: {is_main_process}")
-
-        txt = "/workspace/SSL-Backdoor/test.txt"
-        with open(txt, 'a') as f:
-            f.write("1\n")
-            f.write(f"has dist initialized: {dist.is_initialized()}\n")
-
-
         """生成毒化数据集"""
         poison_index = 0
         max_size = self.max_size
@@ -218,10 +209,20 @@ class CorruptEncoderTrainDataset(TriggerBasedPoisonedTrainDataset):
             support_poison_num = int(len(reference_paths) * support_ratio)
             random.shuffle(reference_paths)
             support_poison_paths, base_poison_paths = reference_paths[:support_poison_num], reference_paths[support_poison_num:]
+            
+            # replace base_poison_paths with reference images from local assets, this is because that corruptencoder uses the reference images they provided
+            new_base_poison_paths = []
+            for _ in range(len(base_poison_paths)):
+                ref_idx = random.randint(1, self.num_references)
+                ref_path = os.path.join(self.reference_dir, str(ref_idx), 'img.png')
+                new_base_poison_paths.append(ref_path)
+            base_poison_paths = new_base_poison_paths
+
             print(f"target class: {target_class}, base poisons: {len(base_poison_paths)}, support poisons: {len(support_poison_paths)}")
 
             for path in support_poison_paths:
-                support_dir = os.path.join(os.path.dirname(os.path.dirname(path)), 'support-images')
+                # find support-images directory
+                support_dir = os.path.join(self.reference_dir, 'support-images')
                 support_image_path = os.path.join(support_dir, random.choice(os.listdir(support_dir)))
                 poisoned_image = concat(support_image_path, path, max_size)
 
@@ -256,6 +257,7 @@ class CorruptEncoderTrainDataset(TriggerBasedPoisonedTrainDataset):
         b_w, b_h = background_image.size
 
         # load foreground
+        print(f"foreground image path: {foreground_image_path}")
         object_image, object_mask = get_foreground(foreground_image_path, self.max_size, 'horizontal')
         o_w, o_h = object_image.size
 
@@ -268,13 +270,10 @@ class CorruptEncoderTrainDataset(TriggerBasedPoisonedTrainDataset):
         l_w = int((l_h/b_h)*b_w)
         background_image = background_image.resize((l_w, l_h))
 
-        if attr_is_true(self.args, 'debug'):
-            pass
-        else:
-            # crop background
-            p_x = int(random.uniform(0, l_w-p_w))
-            p_y = max(l_h-p_h, 0)
-            background_image = background_image.crop((p_x, p_y, p_x+p_w, p_y+p_h))
+        # crop background
+        p_x = int(random.uniform(0, l_w-p_w))
+        p_y = max(l_h-p_h, 0)
+        background_image = background_image.crop((p_x, p_y, p_x+p_w, p_y+p_h))
 
         # paste object
         delta = self.object_marginal
@@ -305,6 +304,15 @@ class CorruptEncoderTrainDataset(TriggerBasedPoisonedTrainDataset):
     
     def apply_poison(self, image, trigger):
         pass
+
+class BltoPoisoningPoisonedTrainDataset(TriggerBasedPoisonedTrainDataset):
+    def __init__(self, args, path_to_txt_file, transform):
+        self.poisoning_agent = AdaptivePoisoningAgent(args)
+        super(BltoPoisoningPoisonedTrainDataset, self).__init__(args, path_to_txt_file, transform)
+        
+    
+    def apply_poison(self, image, trigger):
+        return self.poisoning_agent.apply_poison(image)
 
 class BltoPoisoningPoisonedTrainDataset(TriggerBasedPoisonedTrainDataset):
     def __init__(self, args, path_to_txt_file, transform):
