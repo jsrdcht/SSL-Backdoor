@@ -42,12 +42,12 @@ This library currently supports the following poisoning attack algorithms agains
 
 | Aliase       | Paper                                                                                                                                                              | Conference | Config |
 |-----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|--------|
-| SSLBKD          | [Backdoor attacks on self-supervised learning](https://doi.org/10.1109/CVPR52688.2022.01298)                                                                              | CVPR 2022  | [config](configs/poisoning/poisoning_based/sslbkd.yaml) |
+| SSL-Backdoor          | [Backdoor attacks on self-supervised learning](https://doi.org/10.1109/CVPR52688.2022.01298)                                                                              | CVPR 2022  | [train config](configs/poisoning/sslbkd.yaml) [test config](configs/poisoning/sslbkd_test.yaml) |
+| BadEncoder | [BadEncoder: Backdoor Attacks to Pre-trained Encoders in Self-Supervised Learning](https://ieeexplore.ieee.org/abstract/document/9833644/) | S&P 2022| [config](configs/attacks/badencoder.py) [train config](configs/attacks/badencoder_train.yaml) [test config](configs/attacks/badencoder_test.yaml)|
 | CTRL            | [An Embarrassingly Simple Backdoor Attack on Self-supervised Learning](https://openaccess.thecvf.com/content/ICCV2023/html/Li_An_Embarrassingly_Simple_Backdoor_Attack_on_Self-supervised_Learning_ICCV_2023_paper.html) | ICCV 2023  |  |
-| CorruptEncoder  | [Data poisoning based backdoor attacks to contrastive learning](https://openaccess.thecvf.com/content/CVPR2024/html/Zhang_Data_Poisoning_based_Backdoor_Attacks_to_Contrastive_Learning_CVPR_2024_paper.html)       | CVPR 2024  |  |
+| CorruptEncoder  | [Data poisoning based backdoor attacks to contrastive learning](https://openaccess.thecvf.com/content/CVPR2024/html/Zhang_Data_Poisoning_based_Backdoor_Attacks_to_Contrastive_Learning_CVPR_2024_paper.html)       | CVPR 2024  | [train config](configs/poisoning/corruptencoder_imagenet100.yaml) |
 | BLTO (inference)| [BACKDOOR CONTRASTIVE LEARNING VIA BI-LEVEL TRIGGER OPTIMIZATION](https://openreview.net/forum?id=oxjeePpgSP)                                                              | ICLR 2024  |  |
-| BadEncoder | [BadEncoder: Backdoor Attacks to Pre-trained Encoders in Self-Supervised Learning](https://ieeexplore.ieee.org/abstract/document/9833644/) | S&P 2022| [config](configs/attacks/badencoder.py) |
-| DRUPE | [Distribution Preserving Backdoor Attack in Self-supervised Learning](https://www.computer.org/csdl/proceedings-article/sp/2024/313000a029/1RjEa5rjsHK) | S&P 2024 | [config](configs/attacks/drupe.py), [train](configs/attacks/drupe_train.yaml), [test](configs/attacks/drupe_test.yaml) |
+| DRUPE | [Distribution Preserving Backdoor Attack in Self-supervised Learning](https://www.computer.org/csdl/proceedings-article/sp/2024/313000a029/1RjEa5rjsHK) | S&P 2024 | [config](configs/attacks/drupe.py), [train config](configs/attacks/drupe_train.yaml), [test config](configs/attacks/badencoder_test.yaml) |
 
 ## Supported Defenses
 
@@ -56,8 +56,9 @@ We are actively developing and integrating defense mechanisms. Currently, the fo
 | Aliase        | Paper                                                                                                      | Conference                         |    Config      |
 |------------------|------------------------------------------------------------------------------------------------------------------|---------------------------------------|----------------|
 | PatchSearch    | [Defending Against Patch-Based Backdoor Attacks on Self-Supervised Learning](https://openaccess.thecvf.com/content/CVPR2023/html/Tejankar_Defending_Against_Patch-Based_Backdoor_Attacks_on_Self-Supervised_Learning_CVPR_2023_paper.html)                                       | CVPR2023 |   [doc](./docs/zh_cn/patchsearch.md), [config](configs/defense/patchsearch.py)     |
-| DEDE | [DeDe: Detecting Backdoor Samples for SSL Encoders via Decoders](http://arxiv.org/abs/2411.16154) | CVPR2025 |   [config](configs/defense/dede.py)     |
 | SSL-Cleanse | [SSL-Cleanse: Trojan detection and mitigation in self-supervised learning](https://link.springer.com/chapter/10.1007/978-3-031-73021-4_24) | ECCV2024 |   [config](configs/defense/ssl_cleanse.py)     |
+| DEDE | [DeDe: Detecting Backdoor Samples for SSL Encoders via Decoders](http://arxiv.org/abs/2411.16154) | CVPR2025 |     |
+
 
 ## Setup
 

@@ -1,4 +1,0 @@
-image_size: 224
-shadow_dataset: imagenet100
-shadow_file: data/ImageNet-100/trainset.txt
-memory_file: data/ImageNet-100/trainset.txt

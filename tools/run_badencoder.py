@@ -129,8 +129,9 @@ def main():
     #     else:
     #         raise NotImplementedError(f"未支持的编码器使用信息: {config['encoder_usage_info']}")
     from ssl_backdoor.utils.model_utils import load_model
-    clean_model, processor = load_model(config['arch'], config['pretrained_encoder'], dataset=config['encoder_usage_info'])
-    clean_model = clean_model.cuda()
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    clean_model, processor = load_model('pytorch', config['arch'], config['pretrained_encoder'], dataset=config['encoder_usage_info'], device=device)
+    # clean_model = clean_model.cuda()
     clean_model.eval()
 
     for p in clean_model.parameters():
