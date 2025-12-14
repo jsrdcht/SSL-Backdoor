@@ -126,7 +126,10 @@ def main():
 
     # 5. 加载可疑模型
     from ssl_backdoor.utils.model_utils import load_model
-    suspicious_model, processor = load_model(config.arch, config.weights_path, dataset=config.dataset_name)
+    _arch_lower = str(config.arch).lower()
+    _model_type = 'huggingface' if ('clip' in _arch_lower or 'siglip' in _arch_lower) else 'pytorch'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    suspicious_model, processor = load_model(_model_type, config.arch, config.weights_path, dataset=config.dataset_name, device=device)
     suspicious_model.eval()
 
     from transformers.modeling_outputs import BaseModelOutputWithPooling
