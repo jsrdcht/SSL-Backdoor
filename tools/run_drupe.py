@@ -129,8 +129,11 @@ def main():
     #         raise
 
     # === 新实现: 统一加载预训练模型（参考 run_dede.py） ===
-    clean_model, _ = load_model(config_obj.arch, config_obj.pretrained_encoder, dataset=config_obj.encoder_usage_info)
-    clean_model = clean_model.cuda()
+    _arch_lower = str(config_obj.arch).lower()
+    _model_type = 'huggingface' if ('clip' in _arch_lower or 'siglip' in _arch_lower) else 'pytorch'
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    clean_model, _ = load_model(_model_type, config_obj.arch, config_obj.pretrained_encoder, dataset=config_obj.encoder_usage_info, device=device)
+    # clean_model = clean_model.cuda()
     clean_model.eval()
     
     # 6. 运行DRUPE攻击
