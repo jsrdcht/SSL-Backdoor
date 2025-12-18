@@ -6,6 +6,7 @@ PatchSearch是一种用于检测自监督学习模型中后门的防御方法，
 
 import os
 import numpy as np
+from sklearn.metrics import roc_auc_score
 
 import torch
 
@@ -36,11 +37,8 @@ def run_patchsearch(
     prune_clusters=True,
     batch_size=64,
     num_workers=8,
-    use_cached_feats=True,
-    use_cached_poison_scores=True,
     topk_thresholds=None,
-    experiment_id='defense_run',
-    fast_clustering=False
+    experiment_id='defense_run'
 ):
     """
     运行PatchSearch防御方法
@@ -63,11 +61,8 @@ def run_patchsearch(
         prune_clusters: 是否剪枝聚类
         batch_size: 批处理大小
         num_workers: 工作进程数量
-        use_cached_feats: 是否使用缓存的特征
-        use_cached_poison_scores: 是否使用缓存的毒性分数
         topk_thresholds: top-k阈值列表
         experiment_id: 实验ID，用于创建输出目录
-        fast_clustering: 是否使用快速聚类方法替代FAISS聚类, 默认关闭, 仅用于调试
         
     返回:
         result_dict: 包含检测结果的字典，具有以下键:
@@ -92,7 +87,7 @@ def run_patchsearch(
     if model is None:
         print(f"从权重加载模型: {weights_path}")
 
-        model = get_backbone_model(arch, weights_path)
+        model = get_backbone_model(arch, weights_path, device='cpu', dataset=dataset_name, freeze_backbone=True)
         model.eval()
     else:
         model.eval()
@@ -132,20 +127,9 @@ def run_patchsearch(
         remove_per_iteration=remove_per_iteration,
         batch_size=batch_size,
         num_workers=num_workers,
-        use_cached_feats=use_cached_feats,
-        use_cached_poison_scores=use_cached_poison_scores,
         prune_clusters=prune_clusters,
-        topk_thresholds=topk_thresholds,
-        fast_clustering=fast_clustering
+        topk_thresholds=topk_thresholds
     )
-    
-    # 如果是第一次运行且缓存了特征，可能会返回None
-    if poison_scores is None:
-        print("特征已缓存，请再次运行以使用缓存的特征进行检测")
-        return {
-            "status": "CACHED_FEATURES",
-            "output_dir": experiment_dir
-        }
     
     # 计算topk准确率
     if topk_thresholds is None:
@@ -157,18 +141,26 @@ def run_patchsearch(
             continue
         topk_accuracy[k] = is_poison[sorted_inds[:k]].sum() * 100.0 / k
     
+    # Calculate AUROC
+    try:
+        auroc = roc_auc_score(is_poison, poison_scores)
+    except ValueError:
+        auroc = 0.0
+    
     # 保存结果
     result_dict = {
         "poison_scores": poison_scores,
         "sorted_indices": sorted_inds,
         "is_poison": is_poison,
         "topk_accuracy": topk_accuracy,
+        "auroc": auroc,
         "output_dir": experiment_dir
     }
     
     # 打印结果
     print("\n检测结果:")
     print(f"结果保存在: {experiment_dir}")
+    print(f"AUROC: {auroc*100:.2f}%")
     print("在不同k值下的检测准确率:")
     for k, acc in topk_accuracy.items():
         print(f"Top-{k}: {acc:.2f}%")
@@ -197,7 +189,8 @@ def run_patchsearch_filter(
     weight_decay=1e-4,
     print_freq=10,
     eval_freq=50,
-    seed=42
+    seed=42,
+    external_test_loader=None
 ):
     """
     运行PatchSearch的第二阶段：训练一个分类器来过滤可能的后门样本
@@ -261,7 +254,8 @@ def run_patchsearch_filter(
         weight_decay=weight_decay,
         print_freq=print_freq,
         eval_freq=eval_freq,
-        seed=seed
+        seed=seed,
+        external_test_loader=external_test_loader
     )
     
     print(f"过滤后的数据集已保存到: {filtered_file_path}")
