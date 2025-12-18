@@ -289,8 +289,8 @@ def patchsearch_iterative(
             if prune_clusters:
                 # 移除一些最不有毒的簇
                 rem = int(remove_per_iteration * len(candidate_clusters))
-                candidate_clusters = cluster_scores[:-rem, 0].tolist()
-            
+                candidate_clusters = cluster_scores[:len(cluster_scores)-rem, 0].tolist()
+                
             cur_iter += 1
     
     # 保存或加载有毒得分

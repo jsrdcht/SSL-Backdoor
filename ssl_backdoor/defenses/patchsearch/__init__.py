@@ -38,8 +38,7 @@ def run_patchsearch(
     batch_size=64,
     num_workers=8,
     topk_thresholds=None,
-    experiment_id='defense_run',
-    external_test_loader=None
+    experiment_id='defense_run'
 ):
     """
     运行PatchSearch防御方法

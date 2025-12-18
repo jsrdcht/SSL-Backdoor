@@ -460,7 +460,7 @@ def test(test_loader, model, args):
     
     # Calculate metrics
     if len(np.unique(gt_is_poison)) > 1:
-        tn, fp, fn, tp = confusion_matrix(gt_is_poison, pred_is_poison).ravel()
+        tn, fp, fn, tp = confusion_matrix(gt_is_poison, pred_is_poison, labels=[0, 1]).ravel()
         
         tpr = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
