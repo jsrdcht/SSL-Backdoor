@@ -8,7 +8,27 @@ from tqdm import tqdm
 import torchvision.models as models
 import sys
 
-from ssl_backdoor.utils.model_utils import load_model_weights
+from ssl_backdoor.utils.model_utils import load_checkpoint
+
+
+def load_weights(model, wts_path):
+    """
+    加载模型权重
+    """
+    state_dict = load_checkpoint(wts_path)
+    # 处理前缀
+    state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+    state_dict = {k.replace('model.', ''): v for k, v in state_dict.items()}
+    state_dict = {k.replace('encoder_q.', ''): v for k, v in state_dict.items()}
+    state_dict = {k.replace('backbone.', ''): v for k, v in state_dict.items()}
+    state_dict = {k.replace('encoder.', ''): v for k, v in state_dict.items()}
+    
+    # 过滤掉不匹配的层（如 fc 层）
+    model_state_dict = model.state_dict()
+    state_dict = {k: v for k, v in state_dict.items() if k in model_state_dict and v.shape == model_state_dict[k].shape}
+    
+    model.load_state_dict(state_dict, strict=False)
+    return model
 
 
 def get_model(arch, wts_path, dataset_name):

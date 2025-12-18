@@ -31,10 +31,10 @@ def faiss_kmeans(train_feats, nmb_clusters):
     clus.max_points_per_centroid = 10000000
 
     index = faiss.IndexFlatL2(d)
-    co = faiss.GpuMultipleClonerOptions()
-    co.useFloat16 = True
-    co.shard = True
-    index = faiss.index_cpu_to_all_gpus(index, co)
+    # co = faiss.GpuMultipleClonerOptions()
+    # co.useFloat16 = True
+    # co.shard = True
+    # index = faiss.index_cpu_to_all_gpus(index, co)
 
     # 执行训练
     clus.train(train_feats, index)
