@@ -10,6 +10,7 @@ import random
 import logging
 import numpy as np
 from functools import partial
+from sklearn.metrics import roc_auc_score, confusion_matrix
 import matplotlib.pyplot as plt
 
 import torch
@@ -26,6 +27,7 @@ from tqdm import tqdm
 from .utils.dataset import get_transforms
 from .utils.evaluation import AverageMeter, ProgressMeter, accuracy
 from .utils.visualization import denormalize, show_images_grid
+from ssl_backdoor.utils.utils import set_seed
 
 
 class PoisonDataset(Dataset):
@@ -427,6 +429,7 @@ def test(test_loader, model, args):
     model.eval()
 
     pred_is_poison = np.zeros(len(test_loader.dataset))
+    prob_is_poison = np.zeros(len(test_loader.dataset))
     gt_is_poison = np.zeros(len(test_loader.dataset))
 
     end = time.time()
@@ -439,9 +442,11 @@ def test(test_loader, model, args):
         # 计算输出
         with torch.no_grad():
             output = model(images)
+            probs = F.softmax(output, dim=1)
 
         pred = output.argmax(dim=1).detach().cpu()
         pred_is_poison[inds.numpy()] = pred.numpy()
+        prob_is_poison[inds.numpy()] = probs[:, 1].detach().cpu().numpy()
         gt_is_poison[inds.numpy()] = is_poisoned.numpy().astype(int)
 
         # 测量经过的时间
@@ -453,40 +458,51 @@ def test(test_loader, model, args):
 
     logger.info(f'需要移除的总毒药数: {np.count_nonzero(pred_is_poison)}')
     
-    # 计算毒药召回率
-    if np.sum(gt_is_poison) > 0:
-        poison_recall = pred_is_poison[np.where(gt_is_poison)[0]].astype(float).mean()
+    # Calculate metrics
+    if len(np.unique(gt_is_poison)) > 1:
+        tn, fp, fn, tp = confusion_matrix(gt_is_poison, pred_is_poison).ravel()
+        
+        tpr = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        
+        try:
+            auroc = roc_auc_score(gt_is_poison, prob_is_poison)
+        except ValueError:
+            auroc = 0.0
     else:
-        poison_recall = 0.0
-    logger.info(f'毒药召回率: {poison_recall*100:.1f}%')
-    
-    # 计算毒药精度
-    if np.sum(pred_is_poison) > 0:
-        poison_precision = gt_is_poison[np.where(pred_is_poison)[0]].astype(float).mean()
-    else:
-        poison_precision = 0.0
-    logger.info(f'毒药精度: {poison_precision*100:.1f}%')
+        # If only one class is present in ground truth
+        tpr = 0.0
+        fpr = 0.0
+        precision = 0.0
+        auroc = 0.0
+        logger.warning("Ground truth only contains one class. Metrics might be invalid.")
+        
+    logger.info(f'检测指标:')
+    logger.info(f'TPR (Recall): {tpr*100:.2f}%')
+    logger.info(f'FPR: {fpr*100:.2f}%')
+    logger.info(f'Precision: {precision*100:.2f}%')
+    logger.info(f'AUROC: {auroc*100:.2f}%')
 
-    return poison_recall, poison_precision, pred_is_poison
+    return tpr, precision, pred_is_poison
 
 
-def train(args, poison_scores):
+def train(args, poison_scores, external_test_loader=None):
     """
     训练一个集成分类器来检测和过滤毒药样本
     
     参数:
         args: 配置参数
         poison_scores: 毒性分数数组
+        external_test_loader: 外部测试数据加载器
         
     返回:
         filtered_file_path: 过滤后的干净数据集文件路径
     """
     # 设置随机种子以确保可重现性
     if args.seed is not None:
-        np.random.seed(args.seed)
-        random.seed(args.seed)
-        torch.manual_seed(args.seed)
-        cudnn.deterministic = True
+        set_seed(args.seed)
+
     
     # 设置日志器
     logger = logging.getLogger('patchsearch')
@@ -618,6 +634,14 @@ def train(args, poison_scores):
     # 在测试集上进行最终评估
     logger.info(f'在测试数据上运行推理')
     recall, precision, preds = test(test_loader, ensemble_model, args)
+
+    if external_test_loader is not None:
+        logger.info(f'在外部测试数据上运行推理 (Balanced Clean + Poisoned)')
+        ext_recall, ext_precision, ext_preds = test(external_test_loader, ensemble_model, args)
+        
+        # Calculate extra metrics if needed, test() already prints TPR/FPR/AUROC
+        # But we might want to ensure they are logged clearly as "External Test Metrics"
+        logger.info(f'外部测试集评估完成')
     
     # 保存过滤后的干净数据集
     filtered_file_path = os.path.join(args.output_dir, 'filtered.txt')
@@ -648,7 +672,8 @@ def run_poison_classifier(
     weight_decay=1e-4,
     print_freq=10,
     eval_freq=50,
-    seed=42
+    seed=42,
+    external_test_loader=None
 ):
     """
     运行毒药分类器以过滤可能的后门样本
@@ -708,7 +733,7 @@ def run_poison_classifier(
     logger = logging.getLogger('patchsearch')
     
     # 训练模型并过滤数据集
-    filtered_file_path = train(args, poison_scores)
+    filtered_file_path = train(args, poison_scores, external_test_loader)
     
     return filtered_file_path
 
