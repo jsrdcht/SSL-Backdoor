@@ -21,7 +21,7 @@ import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
 import torchvision.models as models
 from torch.utils.tensorboard import SummaryWriter
-from torch.cuda.amp import autocast, GradScaler
+from torch.cuda.amp import GradScaler
 
 # 项目内部模块
 import ssl_backdoor.ssl_trainers.moco.loader
@@ -29,14 +29,17 @@ import ssl_backdoor.ssl_trainers.moco.builder
 import ssl_backdoor.ssl_trainers.simsiam.builder
 import ssl_backdoor.ssl_trainers.byol.builder
 import ssl_backdoor.ssl_trainers.simclr.builder
+import wandb
 import ssl_backdoor.ssl_trainers.utils as utils
+from ssl_backdoor.utils.utils import set_seed
 import ssl_backdoor.datasets.dataset
+from ssl_backdoor.datasets import dataset_params
 
 from ssl_backdoor.ssl_trainers.utils import (
     initialize_distributed_training, 
     load_config_from_yaml, 
     merge_configs,
-    Logger, 
+    # Logger, 
     load_config, 
     adjust_learning_rate
 )
@@ -71,7 +74,7 @@ def get_trainer(config_or_path):
     # 设置默认值
     args.save_folder_root = getattr(args, 'save_folder_root', 'checkpoints')
     args.experiment_id = getattr(args, 'experiment_id', f"{args.method}_{args.dataset}_{time.strftime('%Y%m%d_%H%M%S')}")
-    args.logger_type = getattr(args, 'logger_type', 'tensorboard')
+    args.logger_type = getattr(args, 'logger_type', 'wandb')
     args.save_folder = os.path.join(args.save_folder_root, args.experiment_id)
     
     # 更新配置字典以保持一致性
@@ -125,13 +128,17 @@ def main_worker(index, args):
     if index == 0:
         # 初始化日志记录器
         args.enable_logging = args.logger_type.lower() != 'none'
-        logger = Logger(
-            log_type=args.logger_type,
-            save_dir=args.save_folder,
-            experiment_id=args.experiment_id,
-            config=vars(args),
-            project=f"ssl-backdoor"
-        )
+        if args.enable_logging:
+            if wandb.run is None:
+                wandb.init(
+                    project="ssl-backdoor",
+                    name=args.experiment_id,
+                    config=vars(args),
+                    dir=args.save_folder
+                )
+            logger = wandb
+        else:
+            logger = None
     else:
         args.enable_logging = False
         logger = None
@@ -150,11 +157,8 @@ def main_worker(index, args):
     # 设置随机种子
     if args.seed is not None:
         args.seed = args.seed + args.rank
-        random.seed(args.seed)
-        torch.manual_seed(args.seed)
+        set_seed(args.seed)
 
-    cudnn.deterministic = True
-    cudnn.benchmark = True
 
     # 创建模型
     print(f"=> 创建模型 '{args.arch}'")
@@ -188,13 +192,20 @@ def main_worker(index, args):
 
     # 分布式训练设置
     if args.distributed:
-        if args.method == 'simsiam' or args.method == 'byol':
+        if args.method in ['simsiam', 'byol']:
             model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+        # 关闭 buffer 广播，避免 _sync_buffers 在前向时发生 NCCL 超时；
+        # 同时启用 find_unused_parameters 以兼容自监督结构中可能未参与反传的参数
+        model = torch.nn.parallel.DistributedDataParallel(
+            model,
+            device_ids=[args.gpu],
+            broadcast_buffers=False,
+            find_unused_parameters=True
+        )
 
     # WandB模型监控（仅主进程）
-    if index == 0 and args.logger_type == 'wandb' and logger is not None and logger.writer is not None:
-        logger.writer.watch(model, log="all", log_freq=args.print_freq)
+    if index == 0 and logger is not None:
+        logger.watch(model, log_freq=args.print_freq)
 
     # 设置优化器参数
     if hasattr(args, 'fix_pred_lr') and args.fix_pred_lr: # only simsiam needs this
@@ -212,6 +223,8 @@ def main_worker(index, args):
     # 根据模型架构选择优化器
     if args.optimizer == 'adamw':
         optimizer = torch.optim.AdamW(optim_params, lr=args.lr, weight_decay=args.weight_decay)
+    elif args.optimizer == 'adam':
+        optimizer = torch.optim.Adam(optim_params, lr=args.lr, weight_decay=args.weight_decay)
     elif args.optimizer == 'sgd':
         optimizer = torch.optim.SGD(
             optim_params, args.lr,
@@ -319,80 +332,81 @@ def main_worker(index, args):
         # 记录当前学习率（主进程）
         if args.rank == 0 and logger is not None:
             current_lr = optimizer.param_groups[0]['lr']
-            logger.add_scalar('train/learning_rate', current_lr, epoch)
+            # 使用该 epoch 最后一个 batch 的全局 step，避免 step 回退
+            global_step_end = (epoch + 1) * len(train_loader) - 1
+            logger.log({'train/learning_rate': current_lr}, step=global_step_end)
             print(f"Epoch {epoch} 的学习率: {current_lr:.8f}")
         
         # 确定是否需要保存检查点和执行评估
         should_save = (epoch + 1) % args.save_freq == 0
         should_eval = do_eval and (epoch + 1) % args.eval_frequency == 0
         
-        # 保存检查点和执行评估（主进程）
+        # 保存检查点（只负责长期持久化，不再为 eval 强制额外保存）
         save_filename = None
         if (args.distributed and args.rank == 0) or (args.index == 0):
-            # 保存检查点（如果需要）
-            if should_save or should_eval:
-                if should_save:
-                    # 正常保存训练检查点
-                    save_dir = args.save_folder
-                    save_filename = os.path.join(save_dir, f'checkpoint_{epoch:04d}.pth.tar')
-                    save_dict = {
-                        'epoch': epoch + 1,
-                        'arch': args.arch,
-                        'state_dict': model.state_dict(),
-                        'optimizer': optimizer.state_dict(),
-                        'scheduler': scheduler.state_dict(),
-                    }
-                    # 如果启用了AMP，也保存scaler的状态
-                    if scaler is not None:
-                        save_dict['scaler'] = scaler.state_dict()
-                    torch.save(save_dict, save_filename)
-                    print(f"已保存检查点至 '{save_filename}'")
-                elif should_eval:
-                    # 仅为评估创建临时检查点，保存在/tmp目录下
-                    tmp_dir = os.path.join('/tmp', f'ssl_backdoor_eval_{args.experiment_id}')
-                    os.makedirs(tmp_dir, exist_ok=True)
-                    save_filename = os.path.join(tmp_dir, f'tmp_checkpoint_{epoch:04d}.pth.tar')
-                    save_dict = {
-                        'epoch': epoch + 1,
-                        'arch': args.arch,
-                        'state_dict': model.state_dict(),
-                        'optimizer': optimizer.state_dict(),
-                        'scheduler': scheduler.state_dict(),
-                    }
-                    # 如果启用了AMP，也保存scaler的状态
-                    if scaler is not None:
-                        save_dict['scaler'] = scaler.state_dict()
-                    torch.save(save_dict, save_filename)
-                    print(f"已保存临时评估检查点至 '{save_filename}'")
+            if should_save:
+                save_dir = args.save_folder
+                save_filename = os.path.join(save_dir, f'checkpoint_{epoch:04d}.pth.tar')
+                save_dict = {
+                    'epoch': epoch + 1,
+                    'arch': args.arch,
+                    'state_dict': model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'scheduler': scheduler.state_dict(),
+                }
+                # 如果启用了AMP，也保存scaler的状态
+                if scaler is not None:
+                    save_dict['scaler'] = scaler.state_dict()
+                torch.save(save_dict, save_filename)
+                print(f"已保存检查点至 '{save_filename}'")
         
-        # 确保所有进程同步
+        # 确保所有进程同步（添加超时处理）
         if args.distributed:
-            dist.barrier()
+            try:
+                print(f"[DEBUG][rank {args.rank}] 等待所有进程完成检查点保存...")
+                dist.barrier()
+                print(f"[DEBUG][rank {args.rank}] 检查点保存同步完成")
+            except Exception as e:
+                print(f"[WARNING][rank {args.rank}] 检查点保存同步失败: {e}")
+                # 即使同步失败，也继续执行，避免程序挂死
         
-        # 执行评估
+        # 执行评估：
+        # - 这里让所有 rank 一起进入 eval（与 eval 代码中分布式逻辑保持一致）
+        # - eval 直接复用当前训练模型的 encoder，而不是强依赖磁盘上的 checkpoint
         if should_eval:
-            # 在分布式环境中同步文件路径
-            if args.distributed:
-                if args.rank == 0:
-                    object_list = [save_filename]
-                else:
-                    object_list = [None]
-                
-                # 广播保存的文件路径
-                dist.broadcast_object_list(object_list, src=0)
-                save_filename = object_list[0]
-            
             # --- 将导入移动到这里 ---
             from tools.test import test_model
             # ---------------------
-            
+
             # 执行评估
+            # 计算并传递当前全局 step，确保验证阶段日志与训练步数对齐
+            eval_step = (epoch + 1) * len(train_loader) - 1
+            setattr(args, 'current_global_step', eval_step)
             print(f"rank {args.rank} 正在评估 epoch {epoch+1} 的模型...")
-            clean_acc, poison_acc, asr = test_model(save_filename, epoch + 1, args, logger, config=(args.test_config if hasattr(args, 'test_config') else None))
+
+            # 将当前训练使用的 encoder 暴露给 eval，避免在 eval 阶段再从磁盘加载
+            eval_backbone = None
+            model_for_eval = model.module if hasattr(model, 'module') else model
+            if hasattr(model_for_eval, 'encoder'):
+                eval_backbone = model_for_eval.encoder
+            setattr(args, 'eval_backbone', eval_backbone)
+
+            eval_config = dict(getattr(args, 'test_config', {}) or {})
+            # 如果未在测试配置中显式指定，则默认沿用训练阶段的分布式设置
+            if 'distributed' not in eval_config:
+                eval_config['distributed'] = bool(getattr(args, 'distributed', False))
+
+            clean_acc, poison_acc, asr = test_model(
+                save_filename,   # 可能为 None，此时 eval 将直接使用 args.eval_backbone
+                epoch + 1,
+                args,
+                logger,
+                config=eval_config
+            )
             
             # 如果是临时评估检查点，测试完成后删除
             if (args.distributed and args.rank == 0) or (args.index == 0):
-                if should_eval and not should_save and os.path.exists(save_filename):
+                if should_eval and not should_save and save_filename and os.path.exists(save_filename):
                     try:
                         os.remove(save_filename)
                         print(f"已删除临时评估检查点: {save_filename}")
@@ -408,10 +422,8 @@ def main_worker(index, args):
             if args.rank == 0:
                 # 添加到日志
                 if logger is not None:
-                    logger.add_scalar('eval/clean_acc', clean_acc, epoch + 1)
-                    logger.add_scalar('eval/poison_acc', poison_acc, epoch + 1)
-                    logger.add_scalar('eval/attack_success_rate', asr, epoch + 1)
-                    
+                    # 使用该 epoch 最后一个 batch 的全局 step，避免 step 回退
+                    global_step_end = (epoch + 1) * len(train_loader) - 1
                     # 构造日志消息
                     log_message = f"评估结果 - Epoch {epoch+1} | Clean Acc: {clean_acc:.2f}% | Poison Acc: {poison_acc:.2f}% | Attack Success Rate: {asr:.2f}%"
                     print(log_message)
@@ -422,7 +434,7 @@ def main_worker(index, args):
                         "eval/poison_acc": poison_acc,
                         "eval/attack_success_rate": asr,
                         "eval/summary": log_message
-                    })
+                    }, step=global_step_end)
                 
                 # 更新最佳结果
                 if clean_acc > best_results['clean_acc']:
@@ -448,13 +460,26 @@ def main_worker(index, args):
                     f.write(f"  Poison Accuracy: {poison_acc:.2f}%\n")
                     f.write(f"  Attack Success Rate: {asr:.2f}%\n")
         
-        # 支持提前退出
-        if args.ablation and epoch == 99:
-            exit(0)
+        # 关键修复：确保所有进程在评估阶段保持同步
+        # 否则 Rank 0 在评估时，其他 Rank 会进入下一轮训练导致 SyncBatchNorm 死锁/超时
+        if should_eval and args.distributed:
+            # 使用 dist.barrier() 前打印日志，方便调试超时问题
+            if args.rank == 0:
+                print(f"Rank 0 评估完成，正在等待其他进程同步 (Barrier)...")
+            try:
+                dist.barrier()
+            except Exception as e:
+                print(f"[WARNING][rank {args.rank}] 评估后同步失败: {e}")
 
+            if args.rank == 0:
+                print(f"所有进程同步完成，继续训练。")
+                
     # 关闭日志
     if args.index == 0 and logger is not None:
-        logger.close()
+        if hasattr(logger, 'finish'):
+            logger.finish()
+        elif hasattr(logger, 'close'):
+            logger.close()
 
 
 def create_data_loader(args):
@@ -467,22 +492,6 @@ def create_data_loader(args):
     Returns:
         torch.utils.data.DataLoader: 训练数据加载器
     """
-    # 数据集参数配置
-    dataset_params = {
-        'imagenet100': {
-            'normalize': transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), 
-            'image_size': 224
-        },
-        'cifar10': {
-            'normalize': transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]), 
-            'image_size': 32
-        },
-        'stl10': {
-            'normalize': transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), 
-            'image_size': 96
-        },
-    }
-
     if args.dataset not in dataset_params:
         raise ValueError(f"不支持的数据集: '{args.dataset}'")
 
@@ -505,7 +514,7 @@ def create_data_loader(args):
         params['normalize'],
     ]
 
-    # 创建双视图转换
+    # cl_regression 现在仅使用两种视图，因此与其他方法统一使用 TwoCropsTransform
     composed_transforms = ssl_backdoor.ssl_trainers.moco.loader.TwoCropsTransform(
         transforms.Compose(augmentation)
     )
@@ -518,7 +527,7 @@ def create_data_loader(args):
         'ctrl': ssl_backdoor.datasets.dataset.CTRLTrainDataset,
         'clean': ssl_backdoor.datasets.dataset.FileListDataset,
         'blto': ssl_backdoor.datasets.dataset.BltoPoisoningPoisonedTrainDataset,
-        'optimized': ssl_backdoor.datasets.dataset.OptimizedTrainDataset,
+        'external_backdoor': ssl_backdoor.datasets.dataset.ExternalBackdoorTrainDataset,
     }
 
     if args.attack_algorithm not in dataset_classes:
@@ -549,18 +558,13 @@ def train(train_loader, model, optimizer, epoch, args, scaler):
     data_time = utils.AverageMeter('Data', '6.3f')
 
     # 根据数据集设置反归一化变换
-    dataset_norm_params = {
-        'imagenet100': {'mean': [0.485, 0.456, 0.406], 'std': [0.229, 0.224, 0.225]},
-        'cifar10': {'mean': [0.4914, 0.4822, 0.4465], 'std': [0.2023, 0.1994, 0.2010]},
-        'stl10': {'mean': [0.485, 0.456, 0.406], 'std': [0.229, 0.224, 0.225]}
-    }
-    
-    if args.dataset not in dataset_norm_params:
+    if args.dataset not in dataset_params:
         raise ValueError(f"不支持的数据集: '{args.dataset}'")
     
     # 设置反归一化变换
-    mean = dataset_norm_params[args.dataset]['mean']
-    std = dataset_norm_params[args.dataset]['std']
+    normalize = dataset_params[args.dataset]['normalize']
+    mean = normalize.mean
+    std = normalize.std
     inv_normalize = transforms.Normalize(
         mean=[-m/s for m, s in zip(mean, std)], 
         std=[1/s for s in std]
@@ -579,7 +583,7 @@ def train(train_loader, model, optimizer, epoch, args, scaler):
         acc1 = utils.AverageMeter('Contr-Acc1', '6.2f')
         acc5 = utils.AverageMeter('Contr-Acc5', '6.2f')
         loss_meters = [contr_meter, acc1, acc5, utils.ProgressMeter.BR]
-    elif args.method == 'simsiam' or args.method == 'byol':
+    elif args.method in ['simsiam', 'byol']:
         loss_meters = [contr_meter, utils.ProgressMeter.BR]
     else:
         loss_meters = [contr_meter]
@@ -602,9 +606,11 @@ def train(train_loader, model, optimizer, epoch, args, scaler):
         # 测量数据加载时间
         data_time.update(time.time() - end)
 
-        # 将图像移动到GPU
+        # 将图像移动到GPU（支持两或三视图）
         images[0] = images[0].cuda(args.gpu, non_blocking=True)
         images[1] = images[1].cuda(args.gpu, non_blocking=True)
+        if len(images) > 2:
+            images[2] = images[2].cuda(args.gpu, non_blocking=True)
 
         # 在第一个epoch的前20个batch保存目标类的图像样本
         if epoch == 0 and i < 20:
@@ -627,7 +633,7 @@ def train(train_loader, model, optimizer, epoch, args, scaler):
 
         # 根据是否使用混合精度训练选择计算方式
         if args.amp:
-            with autocast():
+            with torch.amp.autocast('cuda'):
                 loss = model(images[0], images[1])
             optimizer.zero_grad()
             scaler.scale(loss).backward()
@@ -639,12 +645,10 @@ def train(train_loader, model, optimizer, epoch, args, scaler):
             loss.backward()
             optimizer.step()
 
-        # 如果是BYOL，每个batch后更新目标网络
-        if args.method == 'byol' and hasattr(model, 'module'):
-            # 为分布式模型设置进度
+        # 如果是 BYOL 或 CLRegression，每个batch后更新目标网络
+        if args.method in ['byol'] and hasattr(model, 'module'):
             model.module.update_target(float(epoch) / args.epochs)
-        elif args.method == 'byol':
-            # 为非分布式模型设置进度
+        elif args.method in ['byol']:
             model.update_target(float(epoch) / args.epochs)
 
         # 记录损失
@@ -659,16 +663,20 @@ def train(train_loader, model, optimizer, epoch, args, scaler):
         # 定期打印进度
         if i % args.print_freq == 0 and args.index == 0:
             progress.display(i)
+            if args.enable_logging and logger is not None:
+                current_step = epoch * len(train_loader) + i
+                logger.log({
+                    'train/batch_ssl_loss': loss.item(),
+                    'train/epoch_avg_ssl_loss': contr_meter.avg,
+                }, step=current_step)
 
     # 记录训练指标
     if args.index == 0 and args.enable_logging and logger is not None:
-        logger.add_scalar('train/ssl_loss', contr_meter.avg, epoch)
-        
-        # 对于wandb类型的logger，还需要记录数值型数据
-        if args.logger_type == 'wandb' and hasattr(logger, 'log'):
-            logger.log({
-                "train/epoch": epoch,
-                "train/ssl_loss": contr_meter.avg
-            })
+        # 使用该 epoch 最后一个 batch 的全局 step，避免 step 回退
+        global_step_end = (epoch + 1) * len(train_loader) - 1
+        logger.log({
+            "train/epoch": epoch,
+            "train/ssl_loss": contr_meter.avg
+        }, step=global_step_end)
             
 

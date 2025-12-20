@@ -9,6 +9,7 @@ from typing import Dict, Any, Tuple, List, Optional, Callable
 
 # 第三方库导入
 import numpy as np
+import wandb
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -23,8 +24,14 @@ import torchvision.models as models
 # 项目内部导入
 from tools.eval_utils import AverageMeter, ProgressMeter, accuracy, save_checkpoint
 from ssl_backdoor.datasets.dataset import FileListDataset, OnlineUniversalPoisonedValDataset
+from ssl_backdoor.datasets import dataset_params
 from ssl_backdoor.utils.utils import interpolate_pos_embed
 import ssl_backdoor.ssl_trainers.models_vit as models_vit
+
+# === 调试工具函数 ===
+def _dbg(rank, msg):
+    """带时间戳的调试输出，立即刷新。"""
+    print(f"[DEBUG][rank {rank}] {time.strftime('%Y-%m-%d %H:%M:%S')} - {msg}", flush=True)
 
 
 class Normalize(nn.Module):
@@ -93,40 +100,16 @@ def get_transforms(dataset_name):
     Raises:
         ValueError: 如果数据集不受支持
     """
-    # 数据集归一化参数
-    dataset_params = {
-        'imagenet100': {
-            'mean': [0.485, 0.456, 0.406],
-            'std': [0.229, 0.224, 0.225],
-            'train_size': 224,
-            'val_size': 224,
-            'resize': 256,
-        },
-        'cifar10': {
-            'mean': [0.4914, 0.4822, 0.4465],
-            'std': [0.2023, 0.1994, 0.2010],
-            'train_size': 32,
-            'val_size': 32,
-            'resize': None,  # 不需要额外的resize
-        },
-        'stl10': {
-            'mean': [0.485, 0.456, 0.406],
-            'std': [0.229, 0.224, 0.225],
-            'train_size': 96,
-            'val_size': 96,
-            'resize': None,  # 直接resize到目标大小
-        }
-    }
-    
     if dataset_name not in dataset_params:
         raise ValueError(f"未知数据集 '{dataset_name}'")
     
     params = dataset_params[dataset_name]
-    normalize = transforms.Normalize(mean=params['mean'], std=params['std'])
+    normalize = params['normalize']
+    image_size = params['image_size']
     
     # 创建训练转换
     train_transforms = [
-        transforms.RandomCrop(params['train_size'], padding=4) if dataset_name == 'cifar10' else transforms.RandomResizedCrop(params['train_size'], scale=(0.2, 1.0)),
+        transforms.RandomCrop(image_size, padding=4) if 'cifar' in dataset_name else transforms.RandomResizedCrop(image_size, scale=(0.2, 1.0)),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         normalize,
@@ -136,7 +119,7 @@ def get_transforms(dataset_name):
     # 创建验证转换 - 确保所有图像大小一致
     val_transforms = [
         # 固定大小的调整，强制所有图像具有相同的形状
-        transforms.Resize((params['val_size'], params['val_size'])),
+        transforms.Resize((image_size, image_size)),
     ]
     
     val_transforms.extend([
@@ -200,17 +183,32 @@ def get_dataloaders(args, val_transform):
     return train_val_loader, val_loader, val_poisoned_loader
 
 
-def get_feats(loader, model):
-    """从主干网络提取特征。"""
+def get_feats(loader, model, distributed: bool = False, rank: int = 0, world_size: int = 1):
+    """从主干网络提取特征。
+
+    Args:
+        loader: DataLoader
+        model: backbone 模型
+        distributed: 是否在评估阶段使用分布式收集特征
+        rank: 当前进程 rank（仅在 distributed=True 时生效）
+        world_size: 进程总数（仅在 distributed=True 时生效）
+    """
     model.eval()
     
     # 特征和标签的存储
     feats, labels = None, None
     
-    # 如果是分布式训练，先确保所有进程同步
-    is_distributed = dist.is_initialized()
-    world_size = dist.get_world_size() if is_distributed else 1
-    rank = dist.get_rank() if is_distributed else 0
+    # 是否在评估阶段启用分布式通信
+    is_distributed = distributed and dist.is_initialized()
+    if is_distributed:
+        # 如果外部没有显式传 rank/world_size，则从全局进程组获取
+        if world_size is None:
+            world_size = dist.get_world_size()
+        if rank is None:
+            rank = dist.get_rank()
+    else:
+        world_size = 1
+        rank = 0
     
     # 设置进度条
     progress = ProgressMeter(
@@ -537,7 +535,8 @@ def validate_with_conf_matrix(val_loader, backbone, linear, args):
     backbone.eval()
     linear.eval()
 
-    num_classes = 100 if args.dataset == 'imagenet100' else 10
+    # 根据数据集名称获取类别数量，默认使用 10
+    num_classes = DATASET_NUM_CLASSES.get(args.dataset, 10)
     conf_matrix = np.zeros((num_classes, num_classes))
 
     with torch.no_grad():
@@ -598,18 +597,34 @@ def test_model(model_path, epoch, args, logger=None, config=None):
         asr: 攻击成功率
     """
     
-    # 分布式环境中同步模型路径
-    if args.distributed:
-        if not os.path.exists(model_path) and args.rank != 0:
-            print(f"Rank {args.rank} 等待模型路径广播...")
-            object_list = [None]
-            dist.broadcast_object_list(object_list, src=0)
-            if object_list[0] is not None:
-                model_path = object_list[0]
-                print(f"Rank {args.rank} 收到模型路径: {model_path}")
-            else:
-                raise ValueError(f"Rank {args.rank} 未收到模型路径广播")
-        
+    # ---------------- 调试 ----------------
+    _dbg(getattr(args, 'rank', 0), f"<test_model> start | epoch={epoch} | model={model_path}")
+    # -------------------------------------
+
+    # 评估阶段是否启用分布式
+    # 优先使用外部传入的 config['distributed']，否则退回到训练时的 args.distributed
+    eval_distributed = bool(config.get('distributed', getattr(args, 'distributed', False)) if config else getattr(args, 'distributed', False))
+
+    # 如果训练阶段已经提供了 eval_backbone，则优先直接复用该 backbone，
+    # 避免在评估阶段额外从磁盘加载模型权重
+    has_in_memory_backbone = hasattr(args, 'eval_backbone') and args.eval_backbone is not None
+
+    # 分布式环境中同步模型路径（仅在需要从磁盘加载权重且评估阶段也使用分布式时才需要）
+    if (not has_in_memory_backbone) and eval_distributed and dist.is_initialized():
+        # 由 rank 0 提供合法的模型路径，其它 rank 通过广播获取
+        object_list = [None]
+        if args.rank == 0:
+            if model_path is None or not os.path.exists(model_path):
+                raise ValueError(f"Rank 0 找不到评估模型权重文件: {model_path}")
+            object_list[0] = model_path
+
+        # 所有进程一起参与广播，避免只有部分 rank 调用导致的死锁
+        dist.broadcast_object_list(object_list, src=0)
+        model_path = object_list[0]
+
+        if model_path is None:
+            raise ValueError(f"Rank {args.rank} 未收到有效的模型路径广播")
+
         # 确保所有进程同步
         dist.barrier()
         
@@ -633,14 +648,19 @@ def test_model(model_path, epoch, args, logger=None, config=None):
         'trigger_size': _get_param('trigger_size'),
         'trigger_insert': _get_param('trigger_insert'),
         'attack_algorithm': _get_param('attack_algorithm'),
+        # 外部服务相关（测试阶段需要透传）
+        'external_service_url': _get_param('external_service_url'),
+        'service_url': _get_param('service_url'),
+        'external_secret': _get_param('external_secret'),
+        'external_timeout': _get_param('external_timeout'),
         
         # 可选参数
         'workers': _get_param('workers', 4),
         'batch_size': _get_param('batch_size', 64),
         'print_freq': _get_param('print_freq', 10),
-        'distributed': _get_param('distributed', False),
+        'distributed': _get_param('distributed', eval_distributed),
         'rank': _get_param('rank', 0),
-        'world_size': _get_param('world_size', 1),
+        'world_size': _get_param('world_size', dist.get_world_size() if eval_distributed and dist.is_initialized() else 1),
         
         # 固定参数
         'weights': model_path,
@@ -675,19 +695,30 @@ def test_model(model_path, epoch, args, logger=None, config=None):
         device = torch.device('cpu')
     
     # 获取数据转换
+    _dbg(args_obj.rank, "准备数据转换 get_transforms()")
     train_transform, val_transform = get_transforms(args_obj.dataset)
+    _dbg(args_obj.rank, "数据转换完成")
     
     # 同步所有进程，确保数据加载器创建前所有进程都准备好
     if args.distributed:
         dist.barrier()
     
     # 获取数据加载器
+    _dbg(args_obj.rank, "创建 DataLoader")
     train_val_loader, val_loader, val_poisoned_loader = get_dataloaders(args_obj, val_transform)
+    _dbg(args_obj.rank, "DataLoader 创建完成")
     
-    # 加载主干网络
-    backbone = get_backbone_model(args_obj.arch, model_path, device, args_obj.dataset)
+    # 加载 / 复用主干网络
+    _dbg(args_obj.rank, "加载 backbone 模型")
+    if has_in_memory_backbone:
+        backbone = args.eval_backbone.to(device)
+        _dbg(args_obj.rank, "使用训练阶段传入的 eval_backbone")
+    else:
+        backbone = get_backbone_model(args_obj.arch, model_path, device, args_obj.dataset)
+    _dbg(args_obj.rank, "backbone 加载完成")
+    
     # 不要对没有需要梯度的backbone使用DDP
-    if args.distributed:
+    if eval_distributed and dist.is_initialized():
         # 检查模型是否有需要梯度的参数
         has_grad_params = any(p.requires_grad for p in backbone.parameters())
         if has_grad_params:
@@ -696,16 +727,23 @@ def test_model(model_path, epoch, args, logger=None, config=None):
             print(f"注意: backbone没有需要梯度的参数，不使用DistributedDataParallel包装 (rank {args.rank})")
     
     # 提取特征统计
-    print(f"get_feats ing, the rank is {args.rank}")
-    train_feats, _ = get_feats(train_val_loader, backbone)
-    print(f"get_feats done, the rank is {args.rank}")
+    _dbg(args_obj.rank, "开始提取特征 get_feats()")
+    train_feats, _ = get_feats(
+        train_val_loader,
+        backbone,
+        distributed=eval_distributed,
+        rank=args_obj.rank,
+        world_size=args_obj.world_size,
+    )
+    _dbg(args_obj.rank, "get_feats 完成")
     
     # 计算训练特征的方差和均值
     train_var, train_mean = torch.var_mean(train_feats, dim=0)
     
     # 创建线性分类器
     arch = args_obj.arch if 'moco_' not in args_obj.arch else args_obj.arch.replace('moco_', '')
-    nb_classes = 100 if args_obj.dataset == 'imagenet100' else 10
+    # 根据数据集名称获取类别数量，默认使用 10
+    nb_classes = DATASET_NUM_CLASSES.get(args_obj.dataset, 10)
 
     
     linear = nn.Sequential(
@@ -715,11 +753,11 @@ def test_model(model_path, epoch, args, logger=None, config=None):
     ).to(device)
     
     # 同步所有进程，确保所有进程都创建了线性分类器
-    if args.distributed:
+    if eval_distributed and dist.is_initialized():
         dist.barrier()
         print(f"同步所有进程，确保都创建了线性分类器, rank: {args.rank}")
         
-    if args.distributed:
+    if eval_distributed and dist.is_initialized():
         # 检查模型是否有需要梯度的参数
         has_grad_params = any(p.requires_grad for p in linear.parameters())
         if has_grad_params:
@@ -747,6 +785,7 @@ def test_model(model_path, epoch, args, logger=None, config=None):
     best_acc1 = 0.0
     best_linear_state = None
     
+    _dbg(args_obj.rank, "开始线性分类器训练")
     for e in range(args_obj.epochs):
         print(f"Linear eval epoch {e+1}/{args_obj.epochs}")
         
@@ -792,8 +831,11 @@ def test_model(model_path, epoch, args, logger=None, config=None):
     linear.load_state_dict(best_linear_state)
     
     # 最终评估
+    _dbg(args_obj.rank, "线性分类器训练完成，开始最终评估")
     clean_acc, _, clean_conf_matrix = validate_with_conf_matrix(val_loader, backbone, linear, args_obj)
+    _dbg(args_obj.rank, "Clean 验证完成")
     poison_acc, _, poison_conf_matrix = validate_with_conf_matrix(val_poisoned_loader, backbone, linear, args_obj)
+    _dbg(args_obj.rank, "Poison 验证完成")
     
     # 计算攻击成功率 (Attack Success Rate)
     assert args_obj.attack_target is not None, "攻击目标未指定"
@@ -818,116 +860,166 @@ def test_model(model_path, epoch, args, logger=None, config=None):
         print(f"Clean Confusion Matrix:\n{np.array2string(clean_conf_matrix, precision=0)}")
         print(f"Poison Confusion Matrix:\n{np.array2string(poison_conf_matrix, precision=0)}")
 
-        if logger:
+        # 只在主进程(rank 0)上记录日志和生成可视化
+        if logger and (args.rank == 0 or not args.distributed):
             # 记录基本指标
+            log_step = getattr(args, 'current_global_step', epoch)
             logger.log({
                 "eval/clean_acc": clean_acc,
                 "eval/poison_acc": poison_acc,
                 "eval/attack_success_rate": asr
-            }, step=epoch)
+            }, step=log_step)
             
-            # 创建混淆矩阵的可视化并记录
+            # 创建混淆矩阵的可视化并记录（仅在主进程上执行）
             try:
-                import matplotlib.pyplot as plt
+                try:
+                    import matplotlib
+                    # 使用非交互式后端，避免多进程问题
+                    matplotlib.use('Agg')
+                    import matplotlib.pyplot as plt
+                except ImportError as import_err:
+                    _dbg(args.rank, f"无法导入matplotlib: {import_err}，跳过混淆矩阵可视化")
+                    raise
                 import io
                 from PIL import Image
+                import gc  # 用于垃圾回收
+                
+                _dbg(args.rank, "开始生成混淆矩阵可视化")
                 
                 # 准备类别名称
                 class_names = [str(i) for i in range(clean_conf_matrix.shape[0])]
                 num_classes = clean_conf_matrix.shape[0]
                 
-                # 根据类别数量动态调整图片大小和DPI
-                fig_size = max(10, num_classes * 0.5)  # 随类别数增加而增加
-                dpi = max(100, min(300, 100 + num_classes * 2))  # 提高DPI但设置上限
+                # 根据类别数量动态调整图片大小和DPI，减少内存使用
+                fig_size = min(12, max(8, num_classes * 0.3))  # 限制最大尺寸
+                dpi = min(150, max(80, 80 + num_classes))  # 降低DPI减少内存
                 
                 # 记录干净数据集的混淆矩阵
+                _dbg(args.rank, "生成混淆矩阵可视化 (clean)")
                 plt.figure(figsize=(fig_size, fig_size), dpi=dpi)
                 plt.imshow(clean_conf_matrix, cmap='Blues')
                 plt.colorbar()
                 plt.xlabel('Predicted')
                 plt.ylabel('True')
                 plt.title(f'Clean Confusion Matrix (Epoch {epoch})')
+                
                 # 如果类别较多，可能需要调整标签字体大小
                 if num_classes > 20:
-                    plt.xticks(fontsize=8)
-                    plt.yticks(fontsize=8)
+                    plt.xticks(fontsize=6)
+                    plt.yticks(fontsize=6)
                 if num_classes <= 30:  # 类别不太多时显示刻度
-                    plt.xticks(range(num_classes), class_names)
-                    plt.yticks(range(num_classes), class_names)
+                    plt.xticks(range(num_classes), class_names, fontsize=8)
+                    plt.yticks(range(num_classes), class_names, fontsize=8)
                 
                 # 将图像保存到内存缓冲区
                 clean_buf = io.BytesIO()
-                plt.savefig(clean_buf, format='png', bbox_inches='tight')
+                plt.savefig(clean_buf, format='png', bbox_inches='tight', dpi=dpi)
                 clean_buf.seek(0)
                 
                 # 创建PIL图像对象
                 clean_img = Image.open(clean_buf)
+                clean_np_img = np.array(clean_img)
+                
+                # 清理资源
                 plt.close()
-                plt.clf()  # <---- 添加: 显式清除图形状态
+                plt.clf()
+                clean_buf.close()
+                clean_img.close()
                 
                 # 记录毒化数据集的混淆矩阵
+                _dbg(args.rank, "生成混淆矩阵可视化 (poison)")
                 plt.figure(figsize=(fig_size, fig_size), dpi=dpi)
                 plt.imshow(poison_conf_matrix, cmap='Reds')
                 plt.colorbar()
                 plt.xlabel('Predicted')
                 plt.ylabel('True')
                 plt.title(f'Poison Confusion Matrix (Epoch {epoch})')
+                
                 if num_classes > 20:
-                    plt.xticks(fontsize=8)
-                    plt.yticks(fontsize=8)
-                if num_classes <= 30:  # 类别不太多时显示刻度
-                    plt.xticks(range(num_classes), class_names)
-                    plt.yticks(range(num_classes), class_names)
+                    plt.xticks(fontsize=6)
+                    plt.yticks(fontsize=6)
+                elif num_classes <= 30:  # 类别不太多时显示刻度
+                    plt.xticks(range(num_classes), class_names, fontsize=8)
+                    plt.yticks(range(num_classes), class_names, fontsize=8)
                 
                 # 将图像保存到内存缓冲区
                 poison_buf = io.BytesIO()
-                plt.savefig(poison_buf, format='png', bbox_inches='tight')
+                plt.savefig(poison_buf, format='png', bbox_inches='tight', dpi=dpi)
                 poison_buf.seek(0)
                 
                 # 创建PIL图像对象
                 poison_img = Image.open(poison_buf)
-                plt.close()
-                
-                # 将PIL图像转为numpy数组以便统一处理
-                clean_np_img = np.array(clean_img)
                 poison_np_img = np.array(poison_img)
                 
+                # 清理资源
+                plt.close()
+                plt.clf()
+                poison_buf.close()
+                poison_img.close()
+                
                 # 使用Logger类的标准接口添加图像
-                if hasattr(logger, 'add_image'):
-                    logger.add_image('eval/clean_confusion_matrix', clean_np_img, epoch)
-                    logger.add_image('eval/poison_confusion_matrix', poison_np_img, epoch)
+                _dbg(args.rank, "调用 logger.log 记录混淆矩阵图像")
                 
-                # 对于wandb，额外添加表格格式的混淆矩阵（这是wandb特有的功能）
-                if logger.log_type == 'wandb':
-                    import wandb
-                    # 使用wandb原生表格格式记录混淆矩阵
-                    clean_table = wandb.Table(
-                        columns=["True/Pred"] + class_names,
-                        data=[[class_names[i]] + [float(x) for x in clean_conf_matrix[i].tolist()] for i in range(len(class_names))]
-                    )
-                    # <---- 添加: 调试打印
-                    print(f"DEBUG [rank {args.rank}]: Data for poison_table before creation:\n{np.array2string(poison_conf_matrix, precision=0)}")
-                    poison_table = wandb.Table(
-                        columns=["True/Pred"] + class_names,
-                        data=[[class_names[i]] + [float(x) for x in poison_conf_matrix[i].tolist()] for i in range(len(class_names))]
-                    )
+                # 兼容直接传递 wandb module 或 wandb run 对象
+                if logger is not None:
+                    try:
+                        # 尝试记录图像
+                        logger.log({
+                            'eval/clean_confusion_matrix': wandb.Image(clean_np_img),
+                            'eval/poison_confusion_matrix': wandb.Image(poison_np_img)
+                        }, step=log_step)
 
-                    # <---- 修改: 分开记录表格 -> 合并为一次log，避免wandb对同一step的多次日志合并造成表格显示异常
-                    logger.log({
-                        "eval/clean_confusion_matrix_table": clean_table,
-                        "eval/poison_confusion_matrix_table": poison_table
-                    }, step=epoch)
+                        # 使用wandb原生表格格式记录混淆矩阵
+                        clean_table = wandb.Table(
+                            columns=["True/Pred"] + class_names,
+                            data=[[class_names[i]] + [float(x) for x in clean_conf_matrix[i].tolist()] for i in range(len(class_names))]
+                        )
+                        poison_table = wandb.Table(
+                            columns=["True/Pred"] + class_names,
+                            data=[[class_names[i]] + [float(x) for x in poison_conf_matrix[i].tolist()] for i in range(len(class_names))]
+                        )
+
+                        # 合并为一次log，避免wandb对同一step的多次日志合并造成表格显示异常
+                        logger.log({
+                            "eval/clean_confusion_matrix_table": clean_table,
+                            "eval/poison_confusion_matrix_table": poison_table
+                        }, step=log_step)
+
+                    except Exception as e:
+                         _dbg(args.rank, f"记录 WandB 图像/表格失败: {e}")
                 
-                # 对于tensorboard，额外记录混淆矩阵数据为文本
-                elif logger.log_type == 'tensorboard':
-                    # 由于TensorBoard不支持表格，可以将混淆矩阵作为文本记录
-                    logger.writer.add_text('eval/clean_confusion_matrix_data', str(clean_conf_matrix), epoch)
-                    logger.writer.add_text('eval/poison_confusion_matrix_data', str(poison_conf_matrix), epoch)
+                # 强制垃圾回收，释放内存
+                del clean_np_img, poison_np_img
+                gc.collect()
+                _dbg(args.rank, "混淆矩阵可视化生成完成")
                 
             except Exception as e:
-                print(f"无法创建或记录混淆矩阵可视化: {e}")
+                _dbg(args.rank, f"生成/记录混淆矩阵失败: {e}")
                 import traceback
                 traceback.print_exc()
+        
+        # 如果是分布式训练，尽量同步，但默认跳过全员 barrier 以避免卡死
+        if args.distributed:
+            enable_test_barrier = os.environ.get('ENABLE_TEST_BARRIER', '0') == '1'
+            if enable_test_barrier:
+                try:
+                    _dbg(args.rank, "等待所有进程完成混淆矩阵处理")
+                    dist.barrier()
+                    _dbg(args.rank, "所有进程已同步完成")
+                except Exception as e:
+                    _dbg(args.rank, f"barrier 同步失败，跳过: {e}")
+            else:
+                _dbg(args.rank, "跳过评估末尾的全员 barrier（设置 ENABLE_TEST_BARRIER=1 可启用）")
     
+    _dbg(args_obj.rank, "<test_model> 结束，返回结果")
     return clean_acc, poison_acc, asr
+
+# === 在文件顶部导入区域之后，添加数据集到类别数的映射 ===
+# 数据集到类别数量的映射，便于后续统一引用
+DATASET_NUM_CLASSES = {
+    'imagenet100': 100,
+    'imagenet': 1000,
+    'cifar10': 10,
+    'stl10': 10,
+}
 
