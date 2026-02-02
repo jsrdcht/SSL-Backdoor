@@ -18,6 +18,11 @@ SSL-Backdoor is an academic research library for **backdoor attacks in self-supe
 
 ## 📢 What's New?
 
+✅ **2026-02-02 Update:**
+
+* **Decomp defense is now implemented and available!** See paper: [A Closer Look at Backdoor Attacks on CLIP, ICML 2025](https://openreview.net/forum?id=DWCDyGl6k8)
+
+
 ✅ **2025-12-02 Update:**
 
 * **SSL-Cleanse is now available!** See paper: [SSL-Cleanse: Trojan detection and mitigation in self-supervised learning](https://link.springer.com/chapter/10.1007/978-3-031-73021-4_24)
@@ -58,6 +63,7 @@ We are actively developing and integrating defense mechanisms. Currently, the fo
 | PatchSearch    | [Defending Against Patch-Based Backdoor Attacks on Self-Supervised Learning](https://openaccess.thecvf.com/content/CVPR2023/html/Tejankar_Defending_Against_Patch-Based_Backdoor_Attacks_on_Self-Supervised_Learning_CVPR_2023_paper.html)                                       | CVPR2023 |   [doc](./docs/zh_cn/patchsearch.md), [config](configs/defense/patchsearch.py)     |
 | SSL-Cleanse | [SSL-Cleanse: Trojan detection and mitigation in self-supervised learning](https://link.springer.com/chapter/10.1007/978-3-031-73021-4_24) | ECCV2024 |   [config](configs/defense/ssl_cleanse.py)     |
 | DEDE | [DeDe: Detecting Backdoor Samples for SSL Encoders via Decoders](http://arxiv.org/abs/2411.16154) | CVPR2025 |     |
+| Decomp | [A Closer Look at Backdoor Attacks on CLIP](https://openreview.net/forum?id=DWCDyGl6k8) | ICML 2025 | [config](configs/defense/decomp.yaml) |
 
 
 ## Setup
