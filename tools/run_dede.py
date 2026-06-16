@@ -19,7 +19,7 @@ from ssl_backdoor.attacks.badencoder import datasets as badencoder_datasets
 # DeDe 检测与可视化
 from ssl_backdoor.defenses.dede import run_dede_detection
 from ssl_backdoor.ssl_trainers.utils import load_config
-from ssl_backdoor.datasets.dataset import FileListDataset, OnlineUniversalPoisonedValDataset
+from ssl_backdoor.datasets.dataset import FileListDataset, OnlineUniversalPoisonedValDataset, SSLBackdoorTrainDataset
 from ssl_backdoor.utils.model_utils import get_backbone_model
 from ssl_backdoor.utils.utils import extract_config_by_prefix
 from ssl_backdoor.datasets import dataset_params
@@ -41,6 +41,21 @@ def _print_to_logger(*args, **kwargs):
     logger.info(message)
 
 builtins.print = _print_to_logger
+
+class SkipAugmentationForTensor:
+    """Wrapper to skip incompatible augmentations if the input is already a tensor (e.g., .pt poisoned images)"""
+    def __init__(self, full_transform, tensor_transform=None):
+        self.full_transform = full_transform
+        self.tensor_transform = tensor_transform
+
+    def __call__(self, x):
+        if isinstance(x, torch.Tensor):
+            # If Tensor, use tensor_transform (if provided), otherwise skip
+            if self.tensor_transform:
+                return self.tensor_transform(x)
+            return x
+        # If PIL Image, execute full augmentation chain
+        return self.full_transform(x)
 
 def parse_args():
     """
@@ -122,8 +137,20 @@ def main():
 
     config = argparse.Namespace(**config)
 
+    # ===== 将所有配置文件复制到最终输出目录 =====
+    final_output_dir = config.output_dir  # 确保使用最终确定的输出目录
+    config_files_to_copy = [args.config, args.test_config, args.shadow_config]
+    for file_path in config_files_to_copy:
+        try:
+            if os.path.isfile(file_path):
+                shutil.copy(file_path, os.path.join(final_output_dir, os.path.basename(file_path)))
+            else:
+                print(f"警告: 配置文件 {file_path} 不存在，无法复制。")
+        except Exception as e:
+            print(f"复制配置文件 {file_path} 失败: {e}")
+    # ===== 复制结束 =====
 
-
+    
     # 5. 加载可疑模型
     from ssl_backdoor.utils.model_utils import load_model
     _arch_lower = str(config.arch).lower()
@@ -131,6 +158,28 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     suspicious_model, processor = load_model(_model_type, config.arch, config.weights_path, dataset=config.dataset_name, device=device)
     suspicious_model.eval()
+
+    # === 新增：若 HuggingFace 的 processor 提供了归一化均值/方差，则写入到 config 中 ===
+    if processor is not None:
+        mean, std = None, None
+        # 对应大多数 CLIP/SigLIP 模型，归一化参数位于 image_processor 下
+        if hasattr(processor, 'image_processor'):
+            ip = processor.image_processor
+            if hasattr(ip, 'image_mean') and hasattr(ip, 'image_std'):
+                mean = list(ip.image_mean)
+                std = list(ip.image_std)
+        # 部分 Processor 直接暴露 image_mean/std 属性
+        if mean is None and hasattr(processor, 'image_mean') and hasattr(processor, 'image_std'):
+            mean = list(processor.image_mean)
+            std = list(processor.image_std)
+        # 如果成功解析，则写入 config，供后续 DeDe 使用
+        if mean is not None and std is not None:
+            setattr(config, 'mean', mean)
+            setattr(config, 'std', std)
+            print(f"已从 processor 解析归一化 mean/std: {mean}, {std}")
+        else:
+            print("未找到归一化均值/方差，请检查 processor 配置")
+    # === 新增结束 ===
 
     from transformers.modeling_outputs import BaseModelOutputWithPooling
     class VisionModelWrapper(nn.Module):
@@ -140,8 +189,8 @@ def main():
             self.model_type = model_type.lower()
 
         def forward(self, x):
-            # 针对 HuggingFace CLIP
-            if self.model_type == 'clip':
+            # 任何包含 "clip" 字样的模型（如 clip-vit-base-patch32、clip-rn50 等）均按 CLIP 逻辑处理
+            if 'clip' in self.model_type:
                 # 只传 pixel_values
                 outputs = self.model.get_image_features(pixel_values=x)
                 # 处理不同类型的输出
@@ -173,11 +222,21 @@ def main():
         assert shadow_config_obj.shadow_dataset in dataset_params, f"shadow_dataset 必须是以下之一: {', '.join(dataset_params.keys())}"
         assert 'normalize' in dataset_params[shadow_config_obj.shadow_dataset].keys(), "normalize 未在基础配置文件中设置"
 
-        transform = transforms.Compose([
+        # Define transforms for PIL images
+        transform_pil = transforms.Compose([
             transforms.Resize((shadow_config_obj.image_size, shadow_config_obj.image_size)),
             transforms.ToTensor(),
             dataset_params[shadow_config_obj.shadow_dataset]['normalize']
         ])
+
+        # Define transforms for Tensors (.pt files)
+        transform_tensor = transforms.Compose([
+            transforms.Resize((shadow_config_obj.image_size, shadow_config_obj.image_size), antialias=True),
+            dataset_params[shadow_config_obj.shadow_dataset]['normalize']
+        ])
+
+        # Use SkipAugmentationForTensor to handle both formats
+        transform = SkipAugmentationForTensor(transform_pil, transform_tensor)
 
     # 6.1. 可疑训练数据集
     print("加载可疑训练数据集...")
@@ -197,17 +256,6 @@ def main():
     # )
     
     
-    # 加载内存数据集（用于评估)
-    if hasattr(shadow_config_obj, 'memory_file') and shadow_config_obj.memory_file:
-        memory_dataset = FileListDataset(
-            args=shadow_config_obj,
-            path_to_txt_file=shadow_config_obj.memory_file,
-            transform=transform
-        )
-    else:
-        memory_dataset = None
-    
-
     # 6.2 测试数据集
     
     print("加载干净测试数据集...")
@@ -230,13 +278,38 @@ def main():
 
     # 7. 运行DeDe检测
     print("\n====== 开始运行DeDe后门检测 ======")
+    
+    # 构建 poisoned train set 的 ground truth（按路径是否包含 "poison" 判断）
+    # 注意：对于 SSLBKD，poisoned 样本通常保存为 poisons/poisoned_*.png，因此该规则有效。
+    suspicious_dataset_gt = None
+    train_file_lines = None
+    if hasattr(suspicious_dataset, "file_list_with_poisons"):
+        train_file_lines = suspicious_dataset.file_list_with_poisons
+    elif hasattr(suspicious_dataset, "file_list"):
+        train_file_lines = suspicious_dataset.file_list
+
+    if train_file_lines is not None:
+        gt = []
+        poison_cnt = 0
+        for line in train_file_lines:
+            path = str(line).split()[0]
+            is_poison = 1 if ("poison" in path.lower()) else 0
+            gt.append(is_poison)
+            poison_cnt += is_poison
+
+        if 0 < poison_cnt < len(gt):
+            print(f'Loaded poison ground truth from path keyword "poison": {poison_cnt}/{len(gt)} poisoned.')
+            suspicious_dataset_gt = gt
+        else:
+            print(f'Warning: path-keyword GT found {poison_cnt}/{len(gt)} poisoned. GT disabled.')
+            
     results, clean_dataset, poisoned_dataset = run_dede_detection(
         args=config,
         suspicious_model=suspicious_model,
         suspicious_dataset=suspicious_dataset,
-        memory_dataset=memory_dataset,
         clean_test_dataset=clean_test_dataset,
-        poisoned_test_dataset=poisoned_test_dataset
+        poisoned_test_dataset=poisoned_test_dataset,
+        suspicious_dataset_gt=suspicious_dataset_gt
     )
     
     # 8. 打印结果摘要
@@ -246,21 +319,33 @@ def main():
     print(f"移除有毒样本数量: {results['poisoned_set_size']}")
     print(f"过滤比例: {results['poisoned_set_size'] / (results['clean_set_size'] + results['poisoned_set_size']) * 100:.2f}%")
     
+    if 'train_results' in results and results['train_results']:
+        print("\n====== 训练集检测性能评估 (Suspicious Dataset) ======")
+        print(f"ROC AUC: {results['train_results']['roc_auc']:.4f}")
+        print(f"AUPRC: {results['train_results']['auprc']:.4f}")
+        print(f"TPR (Recall): {results['train_results']['tpr']:.4f}")
+        print(f"FPR: {results['train_results']['fpr']:.4f}")
+        print(f"Precision: {results['train_results']['precision']:.4f}")
+
     if 'test_results' in results and results['test_results']:
         print("\n====== 检测性能评估 ======")
         print(f"ROC AUC: {results['test_results']['roc_auc']:.4f}")
+        if 'auprc' in results['test_results']:
+            print(f"AUPRC: {results['test_results']['auprc']:.4f}")
         
         print("\n-- 最优阈值检测性能 --")
         print(f"最优阈值: {results['test_results']['optimal_threshold']:.4f}")
-        print(f"recall: {results['test_results']['recall']:.4f}")
-        print(f"precision: {results['test_results']['precision']:.4f}")
-        print(f"overall accuracy: {results['test_results']['overall_accuracy']:.4f}")
+        print(f"TPR (Recall): {results['test_results']['tpr']:.4f}")
+        print(f"FPR: {results['test_results']['fpr']:.4f}")
+        print(f"Precision: {results['test_results']['precision']:.4f}")
+        print(f"Overall Accuracy: {results['test_results']['overall_accuracy']:.4f}")
         
         print("\n-- 替代阈值检测性能 --")
         print(f"替代阈值 (干净测试误差均值×1.5): {results['test_results']['test_threshold']:.4f}")
-        print(f"recall: {results['test_results']['alt_recall']:.4f}")
-        print(f"precision: {results['test_results']['alt_precision']:.4f}")
-        print(f"overall accuracy: {results['test_results']['alt_overall_accuracy']:.4f}")
+        print(f"TPR (Recall): {results['test_results']['alt_tpr']:.4f}")
+        print(f"FPR: {results['test_results']['alt_fpr']:.4f}")
+        print(f"Precision: {results['test_results']['alt_precision']:.4f}")
+        print(f"Overall Accuracy: {results['test_results']['alt_overall_accuracy']:.4f}")
     
     print(f"\n过滤后的数据集文件保存在: {os.path.join(config.output_dir, 'filtered_file_list.txt')}")
     print(f"重建误差数据保存在CSV文件中: {os.path.join(config.output_dir, 'training_error_data.csv')} 和 {os.path.join(config.output_dir, 'test_error_data.csv')}")

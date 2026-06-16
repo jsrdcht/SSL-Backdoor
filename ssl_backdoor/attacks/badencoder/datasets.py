@@ -18,7 +18,7 @@ from torchvision import datasets, transforms
 
 from ssl_backdoor.datasets.dataset import FileListDataset
 from ssl_backdoor.datasets import dataset_params
-from ssl_backdoor.datasets.agent import BadEncoderPoisoningAgent
+from ssl_backdoor.datasets.attacker.agent import BadEncoderPoisoningAgent
 from ssl_backdoor.datasets.utils import add_watermark
 
 
@@ -205,7 +205,7 @@ class BadEncoderDataset(VanillaBadEncoderDataset):
         # 准备后门图像
         # backdoored_img_list = [self._prepare_backdoor_images(clean_img) for _ in range(self.args.n_ref)]
         _clean_img = clean_img.resize((self.args.image_size, self.args.image_size), Image.BILINEAR)
-        backdoored_img_list = [add_watermark(_clean_img, watermark = self.trigger_file, watermark_width=self.trigger_size, position='badencoder', mode='patch') for _ in range(self.args.n_ref)]
+        backdoored_img_list = [add_watermark(_clean_img, watermark = self.trigger_file, watermark_width=self.trigger_size, position='badnet', mode='patch') for _ in range(self.args.n_ref)]
         
         # 准备参考图像及其增强版本
         reference_img_list = self._prepare_reference_images()
@@ -240,7 +240,7 @@ class BadEncoderDatasetAsOneBackdoorOutput(BadEncoderDataset):
         # 准备后门图像
         _clean_img = clean_img.resize((self.args.image_size, self.args.image_size), Image.BILINEAR)
         backdoored_img = add_watermark(_clean_img, watermark=self.trigger_file, 
-                                      watermark_width=self.trigger_size, position='badencoder', mode='patch')
+                                      watermark_width=self.trigger_size, position='badnet', mode='patch')
         
         # 应用变换
         if self.transform is not None:

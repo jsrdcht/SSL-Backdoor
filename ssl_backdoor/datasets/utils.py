@@ -125,11 +125,20 @@ def add_watermark(input_image, watermark, watermark_width=50, position='random',
             # 强制将底图 alpha 设为 255，确保公式等价
             base_rgba.putalpha(Image.new('L', base_rgba.size, 255))
 
-        # 构造仅贴片区域有内容的 overlay，overlay 的 alpha 统一为 a
+        # 构造仅贴片区域有内容的 overlay
         overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         wm_rgba = img_watermark.convert('RGBA')
-        uniform_alpha = Image.new('L', (w_width, w_height), int(round(a * 255)))
-        wm_rgba.putalpha(uniform_alpha)
+
+        # 修复逻辑：不再使用 uniform_alpha 覆盖原始 alpha 通道，
+        # 而是将原始 alpha 通道与全局透明度 a 相乘，从而保留触发器自身的形状/透明度信息。
+        if 'A' in wm_rgba.getbands():
+            r, g, b, alpha_channel = wm_rgba.split()
+            # 将原始 alpha 通道与全局 a 混合
+            new_alpha = alpha_channel.point(lambda p: int(p * a))
+            wm_rgba = Image.merge('RGBA', (r, g, b, new_alpha))
+        else:
+            uniform_alpha = Image.new('L', (w_width, w_height), int(round(a * 255)))
+            wm_rgba.putalpha(uniform_alpha)
         overlay.paste(wm_rgba, location)
 
         composited = Image.alpha_composite(base_rgba, overlay).convert('RGB')

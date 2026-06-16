@@ -10,5 +10,5 @@ export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 # 假设你的 python 命令是这样调用的
 CUDA_VISIBLE_DEVICES=2,4 python "${SCRIPT_DIR}/ddp_training.py" \
     --config configs/ssl/simsiam.py \
-    --attack_config configs/poisoning/poisoning_based_copy/na.yaml \
-    --test_config
+    --attack_config configs/poisoning/sslbkd.yaml \
+    --test_config configs/poisoning/sslbkd_test.yaml

@@ -4,10 +4,9 @@ import argparse
 import yaml
 import logging
 import os
-import importlib
+from importlib import util as importlib_util
 import math
 import numpy as np
-import wandb
 import torch
 import torch.distributed as dist
 
@@ -62,8 +61,10 @@ def load_config(config_path):
     """
     if config_path.endswith('.py'):
         # 从Python文件加载配置
-        spec = importlib.util.spec_from_file_location("config_module", config_path)
-        config_module = importlib.util.module_from_spec(spec)
+        spec = importlib_util.spec_from_file_location("config_module", config_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"无法为配置文件创建加载规范: {config_path}")
+        config_module = importlib_util.module_from_spec(spec)
         spec.loader.exec_module(config_module)
         return config_module.config
     elif config_path.endswith('.yaml') or config_path.endswith('.yml'):
@@ -90,16 +91,19 @@ class Logger:
         self.log_type = log_type.lower()
         self.save_dir = save_dir
         self.writer = None
+        self.tb = None
+        self.wandb = None
         self.file_handler = None
         self.logger = None # 用于文件日志
 
         if self.log_type == 'tensorboard':
-            self.writer = SummaryWriter(save_dir)
+            self.tb = SummaryWriter(save_dir)
+            self.writer = self.tb
             print(f"已初始化TensorBoard日志记录器，保存目录: {save_dir}")
-            
+
         elif self.log_type == 'wandb':
             try:
-                import wandb
+                import wandb  # 延迟导入，避免无 wandb 环境下崩溃
                 # 初始化wandb
                 if wandb.run is None:
                     wandb.init(
@@ -109,7 +113,8 @@ class Logger:
                         dir=save_dir,
                         **{k:v for k,v in kwargs.items() if k not in ['project']}
                     )
-                self.writer = wandb
+                self.wandb = wandb
+                self.writer = wandb  # 兼容外部直接访问 writer
                 print(f"已初始化Weights & Biases日志记录器, 实验ID: {experiment_id}")
             except ImportError:
                 print("警告: wandb库未安装，已禁用wandb日志记录，切换到 'none'")
@@ -144,21 +149,25 @@ class Logger:
     def add_scalar(self, tag, value, step):
         """记录标量值"""
         if self.log_type == 'tensorboard':
-            self.writer.add_scalar(tag, value, step)
+            if self.tb is not None:
+                self.tb.add_scalar(tag, value, step)
         elif self.log_type == 'wandb':
             # 同时使用log方法记录，以确保在wandb图表中正确显示
-            self.writer.log({tag: value}, step=step)
+            if self.wandb is not None:
+                self.wandb.log({tag: value}, step=step)
         elif self.log_type == 'file' and self.logger:
             self.logger.info(f"[Step {step}] {tag}: {value}")
     
     def add_scalars(self, main_tag, tag_value_dict, step):
         """记录多个标量值"""
         if self.log_type == 'tensorboard':
-            self.writer.add_scalars(main_tag, tag_value_dict, step)
+            if self.tb is not None:
+                self.tb.add_scalars(main_tag, tag_value_dict, step)
         elif self.log_type == 'wandb':
             # 为每个键添加main_tag前缀，确保与TensorBoard兼容
             prefixed_dict = {f"{main_tag}/{k}": v for k, v in tag_value_dict.items()}
-            self.writer.log(prefixed_dict, step=step)
+            if self.wandb is not None:
+                self.wandb.log(prefixed_dict, step=step)
         elif self.log_type == 'file' and self.logger:
             log_message = f"[Step {step}] {main_tag}: "
             log_message += ", ".join([f"{k}={v}" for k, v in tag_value_dict.items()])
@@ -167,11 +176,14 @@ class Logger:
     def add_image(self, tag, img_tensor, step):
         """记录图像"""
         if self.log_type == 'tensorboard':
-            self.writer.add_image(tag, img_tensor, step)
+            if self.tb is not None:
+                self.tb.add_image(tag, img_tensor, step)
         elif self.log_type == 'wandb':
             if isinstance(img_tensor, torch.Tensor):
                 img_tensor = img_tensor.detach().cpu().numpy()
-            self.writer.log({tag: wandb.Image(img_tensor)}, step=step)
+            # 使用 self.writer.Image 以避免依赖全局 wandb 符号
+            if self.wandb is not None:
+                self.wandb.log({tag: self.wandb.Image(img_tensor)}, step=step)
         elif self.log_type == 'file' and self.logger:
              # 文件日志通常不直接存储图像，只记录事件
              self.logger.info(f"[Step {step}] Image logged: {tag}")
@@ -182,11 +194,13 @@ class Logger:
             # 对于TensorBoard，尝试将字典拆分为单独的标量
             for key, value in data.items():
                 if isinstance(value, (int, float)):
-                    self.writer.add_scalar(key, value, step)
+                    if self.tb is not None:
+                        self.tb.add_scalar(key, value, step)
                 # else: # 保持原有行为，不打印警告
                 #     print(f"无法在TensorBoard中记录非标量值: {key}={value}")
         elif self.log_type == 'wandb':
-            self.writer.log(data, step=step)
+            if self.wandb is not None:
+                self.wandb.log(data, step=step)
         elif self.log_type == 'file' and self.logger:
              log_message = f"[Step {step or 'N/A'}] Log data: "
              if isinstance(data, dict):
@@ -198,11 +212,15 @@ class Logger:
     def close(self):
         """关闭日志记录器"""
         if self.log_type == 'tensorboard':
-            self.writer.close()
+            if self.tb is not None:
+                self.tb.close()
         elif self.log_type == 'wandb':
             # 确保wandb run存在再finish
-            if wandb.run:
-                self.writer.finish()
+            try:
+                if self.wandb is not None and getattr(self.wandb, 'run', None):
+                    self.wandb.finish()
+            except Exception:
+                pass
         elif self.log_type == 'file' and self.logger and self.file_handler:
              # 关闭并移除文件处理器
              self.file_handler.close()

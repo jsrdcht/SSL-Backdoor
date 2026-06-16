@@ -5,6 +5,44 @@ import numpy as np
 import matplotlib.pyplot as plt
 from torchvision import transforms
 
+# =============== 尺寸适配工具函数 ===============
+import torch.nn.functional as F
+
+import random
+
+
+def _resize_for_dede(img: torch.Tensor, target_size: int, mean, std):
+    if img.shape[-1] == target_size:
+        return img
+
+    if not torch.is_tensor(mean):
+        mean = torch.tensor(mean, device=img.device)
+    if not torch.is_tensor(std):
+        std = torch.tensor(std, device=img.device)
+    mean = mean.view(1, 3, 1, 1)
+    std = std.view(1, 3, 1, 1)
+
+    img_denorm = img * std + mean
+    img_resized = F.interpolate(img_denorm, size=(target_size, target_size), mode="bilinear", align_corners=False)
+    img_norm = (img_resized - mean) / std
+    return img_norm
+
+# 递归提取 Normalize
+from torchvision import transforms
+
+def _extract_mean_std(transform):
+    if isinstance(transform, transforms.Normalize):
+        return transform.mean, transform.std
+    elif hasattr(transform, 'transforms'):
+        for t in transform.transforms:
+            res = _extract_mean_std(t)
+            if res is not None:
+                return res
+    # Add support for SkipAugmentationForTensor wrapper (check full_transform)
+    elif hasattr(transform, 'full_transform'):
+        return _extract_mean_std(transform.full_transform)
+    return None
+
 # DeDe specific modules
 from ssl_backdoor.defenses.dede.decoder_model import DecoderModel
 from ssl_backdoor.ssl_trainers.utils import load_config
@@ -53,16 +91,6 @@ def save_image_grid(original_images, reconstructed_images, masks, save_path):
     plt.close()
 
 
-def build_transform(image_size: int, dataset_name: str):
-    """根据数据集名称构建默认的图像变换"""
-    if dataset_name not in dataset_params:
-        raise ValueError(f"数据集 {dataset_name} 未在 dataset_params 中注册，无法构建变换")
-    normalize = dataset_params[dataset_name]["normalize"]
-    return transforms.Compose([
-        transforms.Resize((image_size, image_size)),
-        transforms.ToTensor(),
-        normalize,
-    ])
 
 
 def load_decoder(config, device="cuda"):
@@ -94,24 +122,37 @@ def visualize_pairs(config, suspicious_model, decoder_model, clean_dataset, pois
     recon_dir = os.path.join(config.output_dir, "recon_images")
     os.makedirs(recon_dir, exist_ok=True)
 
-    num_pairs = min(num_pairs, len(clean_dataset), len(poisoned_dataset))
+    # 解析归一化参数
+    ms = _extract_mean_std(getattr(clean_dataset, 'transform', None))
+    if ms is None:
+        mean = [0.485, 0.456, 0.406]
+        std = [0.229, 0.224, 0.225]
+    else:
+        mean, std = ms
+
+    # 随机抽取要可视化的索引，而不是依次取前 num_pairs 个样本
+    indices = random.sample(range(len(clean_dataset)), num_pairs)
     clean_imgs, poisoned_imgs = [], []
     clean_recons, poisoned_recons = [], []
     clean_masks, poisoned_masks = [], []
 
     with torch.no_grad():
-        for i in range(num_pairs):
-            clean_img = clean_dataset[i][0] if isinstance(clean_dataset[i], tuple) else clean_dataset[i]
-            poisoned_img = poisoned_dataset[i][0] if isinstance(poisoned_dataset[i], tuple) else poisoned_dataset[i]
+        for idx in indices:
+            clean_img = clean_dataset[idx][0] if isinstance(clean_dataset[idx], tuple) else clean_dataset[idx]
+            poisoned_img = poisoned_dataset[idx][0] if isinstance(poisoned_dataset[idx], tuple) else poisoned_dataset[idx]
 
             clean_img = clean_img.unsqueeze(0).cuda()
             poisoned_img = poisoned_img.unsqueeze(0).cuda()
 
             clean_feature = suspicious_model(clean_img)
-            clean_recon, clean_mask = decoder_model(clean_img, clean_feature)
+
+            clean_img_for_decoder = _resize_for_dede(clean_img, config.image_size, mean, std)
+            clean_recon, clean_mask = decoder_model(clean_img_for_decoder, clean_feature)
 
             poisoned_feature = suspicious_model(poisoned_img)
-            poisoned_recon, poisoned_mask = decoder_model(poisoned_img, poisoned_feature)
+
+            poisoned_img_for_decoder = _resize_for_dede(poisoned_img, config.image_size, mean, std)
+            poisoned_recon, poisoned_mask = decoder_model(poisoned_img_for_decoder, poisoned_feature)
 
             clean_imgs.append(clean_img.squeeze(0))
             poisoned_imgs.append(poisoned_img.squeeze(0))
@@ -137,27 +178,54 @@ def visualize_dataset(config, suspicious_model, decoder_model, dataset, num_imag
     recon_dir = os.path.join(config.output_dir, "recon_images")
     os.makedirs(recon_dir, exist_ok=True)
 
+    # 解析归一化参数
+    ms = _extract_mean_std(getattr(dataset, 'transform', None))
+    if ms is None:
+        mean = [0.485, 0.456, 0.406]
+        std = [0.229, 0.224, 0.225]
+    else:
+        mean, std = ms
+
     num_images = min(num_images, len(dataset))
+    # 随机抽样
+    indices = random.sample(range(len(dataset)), num_images)
     original_images, reconstructed_images, reconstruction_masks = [], [], []
 
     with torch.no_grad():
-        for idx in range(num_images):
+        for j, idx in enumerate(indices):
             img = dataset[idx][0] if isinstance(dataset[idx], tuple) else dataset[idx]
             img = img.unsqueeze(0).cuda()
             feature = suspicious_model(img)
-            recon_img, mask = decoder_model(img, feature)
+
+            img_for_decoder = _resize_for_dede(img, config.image_size, mean, std)
+            recon_img, mask = decoder_model(img_for_decoder, feature)
 
             original_images.append(img.squeeze(0))
             reconstructed_images.append(recon_img.squeeze(0))
             reconstruction_masks.append(mask.squeeze(0))
 
-            single_path = os.path.join(recon_dir, f"recon_{idx + 1}.png")
+            single_path = os.path.join(recon_dir, f"recon_{j + 1}.png")
             save_image_grid([img.squeeze(0)], [recon_img.squeeze(0)], [mask.squeeze(0)], single_path)
 
     grid_path = os.path.join(recon_dir, "recon_grid.png")
     save_image_grid(original_images, reconstructed_images, reconstruction_masks, grid_path)
     print(f"已保存 {num_images} 张样本的重建结果至: {grid_path}")
 
+
+class SkipAugmentationForTensor:
+    """Wrapper to skip incompatible augmentations if the input is already a tensor (e.g., .pt poisoned images)"""
+    def __init__(self, full_transform, tensor_transform=None):
+        self.full_transform = full_transform
+        self.tensor_transform = tensor_transform
+
+    def __call__(self, x):
+        if isinstance(x, torch.Tensor):
+            # If Tensor, use tensor_transform (if provided), otherwise skip
+            if self.tensor_transform:
+                return self.tensor_transform(x)
+            return x
+        # If PIL Image, execute full augmentation chain
+        return self.full_transform(x)
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="DeDe 图像重建脚本 (独立版)")
@@ -202,11 +270,30 @@ def main():
     config = argparse.Namespace(**config)
     
     # 4. 创建数据转换
-    transform = transforms.Compose([
+    # Define transforms for PIL images
+    transform_pil = transforms.Compose([
         transforms.Resize((shadow_config_obj.image_size, shadow_config_obj.image_size)),
         transforms.ToTensor(),
         dataset_params[shadow_config_obj.shadow_dataset]['normalize']
     ])
+
+    # Define transforms for Tensors (.pt files)
+    transform_tensor = transforms.Compose([
+        transforms.Resize((shadow_config_obj.image_size, shadow_config_obj.image_size), antialias=True),
+        dataset_params[shadow_config_obj.shadow_dataset]['normalize']
+    ])
+
+    # Use SkipAugmentationForTensor to handle both formats
+    transform = SkipAugmentationForTensor(transform_pil, transform_tensor)
+
+    ms = _extract_mean_std(transform)
+    if ms is None:
+        mean = [0.485, 0.456, 0.406]
+        std = [0.229, 0.224, 0.225]
+        print(f"未能解析Normalize，使用默认 ImageNet mean/std: {mean}, {std}")
+    else:
+        mean, std = list(ms[0]), list(ms[1])
+        print(f"已解析Normalize mean/std: {mean}, {std}")
     
     # 5. 加载数据集
     print("加载可疑训练数据集...")
@@ -218,15 +305,6 @@ def main():
         reference_file=shadow_config_obj.reference_file,
         trigger_file=shadow_config_obj.trigger_file
     )
-    
-    # 加载内存数据集（用于评估)
-    memory_dataset = None
-    if hasattr(shadow_config_obj, 'memory_file') and shadow_config_obj.memory_file:
-        memory_dataset = FileListDataset(
-            args=shadow_config_obj,
-            path_to_txt_file=shadow_config_obj.memory_file,
-            transform=transform
-        )
     
     print("加载干净测试数据集...")
     clean_test_dataset = FileListDataset(

@@ -9,37 +9,7 @@ from tqdm import tqdm
 import numpy as np
 from PIL import Image
 from .gradcam import run_gradcam
-
-
-def denormalize(x, dataset):
-    """
-    对图像进行反归一化处理
-    
-    参数:
-        x: 归一化后的图像tensor
-        dataset: 数据集名称
-        
-    返回:
-        反归一化后的图像tensor，取值范围[0, 1]
-    """
-    if x.shape[0] == 3:
-        x = x.permute((1, 2, 0))
-
-    if dataset == 'imagenet100':
-        mean = torch.tensor([0.485, 0.456, 0.406], device=x.device)
-        std = torch.tensor([0.229, 0.224, 0.225], device=x.device)
-    elif dataset == 'cifar10':
-        mean = torch.tensor([0.4914, 0.4822, 0.4465], device=x.device)
-        std = torch.tensor([0.2023, 0.1994, 0.2010], device=x.device)
-    elif dataset == 'stl10':
-        mean = torch.tensor([0.485, 0.456, 0.406], device=x.device)
-        std = torch.tensor([0.229, 0.224, 0.225], device=x.device)
-    else:
-        raise ValueError(f"Unknown dataset '{dataset}'")
-    x = ((x * std) + mean)
-
-    x = torch.clamp(x, 0, 1)
-    return x
+from .dataset import denormalize
 
 
 def paste_patch(inputs, patch):

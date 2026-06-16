@@ -26,6 +26,5 @@ test_trigger_insert: patch
 test_attack_algorithm: sslbkd
 
 return_attack_target: False
-attack_target_word: n01558993
 trigger_insert: patch
 trigger_size: 50

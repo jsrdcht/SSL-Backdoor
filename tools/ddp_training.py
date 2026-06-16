@@ -49,7 +49,7 @@ def main():
             print(f"警告：加载测试配置文件 {args.test_config} 时出错: {e}，跳过合并。")
 
     print("\n最终使用的训练配置:", config)
-    print("\n最终使用的测试配置:", config['test_config'])
+    print("\n最终使用的测试配置:", config.get('test_config'))
     
     # 5. 获取训练器 (传入更新后的config字典)
     trainer = get_trainer(config)

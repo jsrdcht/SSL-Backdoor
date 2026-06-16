@@ -7,20 +7,14 @@
 *.pth.tar
 
 # Ignore all datasets
-data/
+
 
 # Ignore all training results
 results/
+tmp/
 
 # Ignore repos and submodules
 .trash/
-CompRess/
-defense/
-mine-pytorch/
-simsiam_old/
-SSL-Cleanse/
-scripts_old/
-trash/
 ssl_backdoor/projects/
 ssl_backdoor/defenses/projects/
 
@@ -32,10 +26,6 @@ projects/
 scripts_old/
 projects/
 
-ssl_backdoor/datasets/hidden.py
-ssl_backdoor/defenses/hidden/
-ssl_backdoor/defenses/patchsearch/PatchSearch/
-ssl_backdoor/defenses/dede/DeDe/
 
 # trash
 .trash/
@@ -49,3 +39,5 @@ ssl_backdoor/ssl_trainers/moco/moco_badencoder
 ssl_backdoor/ssl_trainers/moco/simsiam_badencoder
 ssl_backdoor/ssl_trainers/moco/main_moco\ copy.py
 ssl_backdoor/ssl_trainers/moco/main_moco_badencoder2.py
+# Pixi environment dir (do not commit; regenerate via: pixi install -e cuda)
+.pixi/
