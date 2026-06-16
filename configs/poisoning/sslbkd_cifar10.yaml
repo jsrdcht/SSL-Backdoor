@@ -15,7 +15,6 @@ num_reference_list:
 num_poison_list:
   - 2500
 
-attack_target_word: n01558993
 trigger_insert: patch
 trigger_size: 8
 

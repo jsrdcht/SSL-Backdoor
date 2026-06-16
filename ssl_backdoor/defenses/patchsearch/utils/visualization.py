@@ -7,41 +7,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
-
-
-def denormalize(x, args):
-    """
-    将归一化的图像张量转换回正常的图像张量。
-    
-    参数:
-        x: 归一化的图像张量
-        args: 配置参数，包含dataset_name
-        
-    返回:
-        去归一化的图像张量
-    """
-    if x.dim() == 4:  # 批处理
-        return torch.stack([denormalize(x_i, args) for x_i in x])
-        
-    if x.shape[0] == 3:  # CHW -> HWC
-        x = x.permute((1, 2, 0))
-    
-    if "imagenet" in args.dataset_name:
-        mean = torch.tensor([0.485, 0.456, 0.406], device=x.device)
-        std = torch.tensor([0.229, 0.224, 0.225], device=x.device)
-    elif "cifar10" in args.dataset_name:
-        mean = torch.tensor([0.4914, 0.4822, 0.4465], device=x.device)
-        std = torch.tensor([0.2023, 0.1994, 0.2010], device=x.device)
-    elif "stl10" in args.dataset_name:
-        mean = torch.tensor([0.485, 0.456, 0.406], device=x.device)
-        std = torch.tensor([0.229, 0.224, 0.225], device=x.device)
-    else:
-        raise ValueError(f"未知数据集 '{args.dataset_name}'")
-        
-    x = ((x * std) + mean)
-    x = torch.clamp(x, 0, 1)
-    
-    return x
+from .dataset import denormalize
 
 
 def save_image(img_tensor, path, args=None):
@@ -54,7 +20,7 @@ def save_image(img_tensor, path, args=None):
         args: 配置参数
     """
     if args is not None:
-        img_tensor = denormalize(img_tensor, args)
+        img_tensor = denormalize(img_tensor, args.dataset_name)
     
     if img_tensor.dim() == 3 and img_tensor.shape[0] == 3:  # CHW -> HWC
         img_tensor = img_tensor.permute(1, 2, 0)
@@ -99,7 +65,7 @@ def show_images_grid(inp, save_dir, title, args=None, max_images=40, nrows=8, nc
         
         # 去归一化并显示图像
         if args is not None:
-            rgb_image = denormalize(inp[img_idx], args).detach().cpu().numpy()
+            rgb_image = denormalize(inp[img_idx], args.dataset_name).detach().cpu().numpy()
         else:
             rgb_image = inp[img_idx].detach().cpu().numpy()
             if rgb_image.shape[0] == 3:  # CHW -> HWC
@@ -167,7 +133,7 @@ def show_cam_on_image(inp, cam, save_dir, title, args=None, alpha=0.5):
         
         # 去归一化图像
         if args is not None:
-            rgb_image = denormalize(inp[img_idx], args).detach().cpu().numpy()
+            rgb_image = denormalize(inp[img_idx], args.dataset_name).detach().cpu().numpy()
         else:
             rgb_image = inp[img_idx].detach().cpu().numpy()
             if rgb_image.shape[0] == 3:  # CHW -> HWC

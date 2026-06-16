@@ -1,0 +1,44 @@
+[workspace]
+channels = ["nvidia", "pytorch", "conda-forge"]
+name = "SSL-Backdoor"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[dependencies]
+python = "3.10.*"
+pytorch = ">=2.2,<2.5"
+torchvision = "*"
+torchaudio = "*"
+numpy = "*"
+pandas = "*"
+scikit-learn = "*"
+matplotlib-base = ">=3.7"
+seaborn = "*"
+pillow = ">=10.0.0"
+pyyaml = "*"
+tqdm = "*"
+timm = "*"
+einops = "*"
+transformers = ">=4.46.3"
+pot = "*"
+tensorboard = "*"
+wandb = "*"
+libjpeg-turbo = ">=3.0.0,<4.0a0"
+
+[pypi-dependencies]
+kmeans-pytorch = "*"
+lightly = "*"
+opencv-python-headless = ">=4.12.0.88, <5"
+
+[feature.cuda.dependencies]
+pytorch-cuda = "12.1.*"
+
+[feature.cuda.pypi-dependencies]
+opencv-python = ">=4.12.0.88, <5"
+
+[environments]
+default = { features = [] }
+cuda = { features = ["cuda"] }
+
+[tasks]
+check = "python -c 'import torch, timm, einops, transformers, PIL, yaml; print(\"ok:\", torch.__version__, \"cuda?\", torch.cuda.is_available())'"

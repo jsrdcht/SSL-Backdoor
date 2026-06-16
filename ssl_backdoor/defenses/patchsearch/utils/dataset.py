@@ -7,6 +7,7 @@ from torch.utils.data import Dataset, DataLoader, Subset
 import torchvision.transforms as transforms
 from PIL import Image
 from tqdm import tqdm
+from ssl_backdoor.datasets import dataset_params
 
 
 class FileListDataset(Dataset):
@@ -99,6 +100,35 @@ def get_transforms(dataset_name, image_size):
         ])
     
     return val_transform
+
+
+def denormalize(x, dataset_name):
+    """
+    对图像进行反归一化处理
+
+    参数:
+        x: 归一化后的图像tensor
+        dataset_name: 数据集名称
+
+    返回:
+        反归一化后的图像tensor，取值范围[0, 1]
+    """
+    if x.dim() == 4:  # batch
+        return torch.stack([denormalize(x_i, dataset_name) for x_i in x])
+
+    if x.shape[0] == 3:  # CHW -> HWC
+        x = x.permute((1, 2, 0))
+
+    if dataset_name not in dataset_params:
+        raise ValueError(f"Unknown dataset '{dataset_name}'")
+
+    norm = dataset_params[dataset_name]['normalize']
+    mean = torch.tensor(norm.mean, device=x.device)
+    std = torch.tensor(norm.std, device=x.device)
+
+    x = ((x * std) + mean)
+    x = torch.clamp(x, 0, 1)
+    return x
 
 
 def get_test_images(train_val_dataset, cluster_wise_i, test_images_size):

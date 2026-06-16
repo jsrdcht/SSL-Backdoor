@@ -453,7 +453,7 @@ def test(test_loader, model, args):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % (len(test_loader) // 20) == 0:
+        if i % max(1, len(test_loader) // 20) == 0:
             logger.info(progress.display(i))
 
     logger.info(f'需要移除的总毒药数: {np.count_nonzero(pred_is_poison)}')

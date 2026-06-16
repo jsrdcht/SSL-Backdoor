@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+
+from torch.nn import LazyLinear
+from torch.nn.parameter import UninitializedParameter
 from einops import repeat, rearrange
 from einops.layers.torch import Rearrange
 from timm.models.layers import trunc_normal_
@@ -178,23 +181,33 @@ class DecoderModel(nn.Module):
         self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, mask_ratio)
         self.decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head)
 
-        # 根据不同的backbone架构设置适当的投影层
-        if arch == 'resnet18':
-            self.mlp = nn.Sequential(nn.Linear(512, emb_dim, bias=False))
-        elif arch == 'resnet34':
-            self.mlp = nn.Sequential(nn.Linear(512, emb_dim, bias=False))
-        elif arch == 'resnet50':
-            self.mlp = nn.Sequential(nn.Linear(2048, emb_dim, bias=False))
-        elif arch == 'clip':
-            self.mlp = nn.Sequential(nn.Linear(512, emb_dim, bias=False))
-        elif arch == 'vit':
-            self.mlp = nn.Sequential(nn.Linear(768, emb_dim, bias=False))
-        elif arch == 'mocov2':
-            self.mlp = nn.Sequential(nn.Linear(2048, emb_dim, bias=False))
-        elif arch == 'simsiam':
-            self.mlp = nn.Sequential(nn.Linear(2048, emb_dim, bias=False))
+        # 根据arch字符串粗略判断 backbone 输出维度；若无法识别，使用LazyLinear自动推断
+        arch = arch.lower()
+        if 'resnet18' in arch or 'resnet34' in arch:
+            in_dim = 512
+        elif 'resnet50' in arch:
+            in_dim = 2048
+        elif 'clip' in arch or 'siglip' in arch:
+            # CLIP/SigLIP 的图像特征维度与具体模型强相关（512/768/1024/...）
+            # 这里不要硬编码，改用 LazyLinear 在第一次 forward 时自动推断
+            in_dim = None
+        elif 'vit' in arch:
+            in_dim = 768
+        elif 'moco' in arch or 'simsiam' in arch:
+            in_dim = 2048
         else:
-            raise NotImplementedError(f"Unsupported architecture: {arch}")
+            in_dim = None  # 采用LazyLinear在首次forward时自动推断
+
+        if in_dim is not None:
+            self.mlp = nn.Sequential(nn.Linear(in_dim, emb_dim, bias=False))
+        else:
+            # 当无法提前确定输入维度时，使用LazyLinear让PyTorch在第一次forward时自动确定
+            try:
+                from torch.nn import LazyLinear
+                self.mlp = nn.Sequential(LazyLinear(emb_dim, bias=False))
+                print(f"[DecoderModel] 使用 LazyLinear 自动推断输入维度 (arch={arch})")
+            except ImportError:
+                raise NotImplementedError(f"Unsupported architecture and LazyLinear unavailable: {arch}")
             
         self.init_weights()
         
@@ -203,6 +216,9 @@ class DecoderModel(nn.Module):
         # 初始化MLP投影层
         for m in self.mlp:
             if isinstance(m, nn.Linear):
+                # LazyLinear 在第一次 forward 前权重是 UninitializedParameter，不能做初始化
+                if isinstance(getattr(m, "weight", None), UninitializedParameter):
+                    continue
                 torch.nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)

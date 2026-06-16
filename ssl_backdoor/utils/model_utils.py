@@ -66,9 +66,19 @@ def remove_task_head_for_encoder(model: nn.Module):
 def load_checkpoint(wts_path: str) -> Dict[str, Any]:
     """加载并处理模型权重文件。"""
     checkpoint = torch.load(wts_path, map_location='cpu')
-    for key in ['model', 'state_dict', 'model_state_dict']:
-        if key in checkpoint:
-            return checkpoint[key]
+    # 常见保存格式：
+    # 1) {"state_dict": OrderedDict(...)} / {"model": ...} / {"model_state_dict": ...}
+    # 2) 直接保存 state_dict（OrderedDict/Dict[str, Tensor]），例如 torchvision 的 *.pth
+    # 3) 直接保存 nn.Module（少见）
+    if isinstance(checkpoint, dict):
+        for key in ['model', 'state_dict', 'model_state_dict']:
+            if key in checkpoint:
+                return checkpoint[key]
+        # 兼容“checkpoint 本体就是 state_dict”的情况
+        if all(isinstance(k, str) for k in checkpoint.keys()) and any(torch.is_tensor(v) for v in checkpoint.values()):
+            return checkpoint
+    if hasattr(checkpoint, "state_dict"):
+        return checkpoint.state_dict()
     raise ValueError(f'No model or state_dict found in {wts_path}.')
 
 
@@ -140,8 +150,19 @@ def load_huggingface_representation_model(model_name, device='cpu'):
     """
 
     if 'clip' in model_name.lower():
-        model = CLIPModel.from_pretrained(f"{HUGGINGFACE_MODEL_PATH}/{model_name}")
-        processor = CLIPProcessor.from_pretrained(f"{HUGGINGFACE_MODEL_PATH}/{model_name}")
+        model_dir = f"{HUGGINGFACE_MODEL_PATH}/{model_name}"
+        model = CLIPModel.from_pretrained(model_dir)
+        try:
+            processor = CLIPProcessor.from_pretrained(model_dir)
+        except Exception as e:
+            # 一些本地 CLIP 权重的 tokenizer.json 可能与 fast tokenizer 不兼容；
+            # fallback 到 slow tokenizer（基于 merges.txt/vocab.json）更稳。
+            msg = str(e)
+            if "ModelWrapper" in msg or "TokenizerFast.from_file" in msg:
+                print(f"[load_huggingface_representation_model] CLIP fast tokenizer 加载失败，改用 use_fast=False: {e}")
+                processor = CLIPProcessor.from_pretrained(model_dir, use_fast=False)
+            else:
+                raise
     elif 'siglip' in model_name.lower():
         model = AutoModel.from_pretrained(f"{HUGGINGFACE_MODEL_PATH}/{model_name}/model")
         processor = AutoProcessor.from_pretrained(f"{HUGGINGFACE_MODEL_PATH}/{model_name}/processor")
@@ -155,14 +176,14 @@ def load_huggingface_representation_model(model_name, device='cpu'):
     return model, processor
 
 
-def load_model(model_type: str, model_name: str, model_path: str, dataset: str = 'cifar10', device: str = 'cpu') -> Tuple[nn.Module, Optional[Any]]:
+def load_model(model_type: str, model_name: str, model_path: Optional[str], dataset: str = 'cifar10', device: str = 'cpu') -> Tuple[nn.Module, Optional[Any]]:
     """
     加载模型（支持 pytorch 与 huggingface）。
 
     Args:
         model_type (str): 模型来源类型，取值为 'pytorch' 或 'huggingface'（兼容常见拼写变体）。
         model_name (str): 模型名称。
-        model_path (str): 训练好的模型权重路径。
+        model_path (str | None): 训练好的模型权重路径；为 None 表示不额外加载 checkpoint（直接使用 from_pretrained 权重）。
         dataset (str): 数据集名称，用于 pytorch 模型的结构适配。
         device (str): 模型加载到的设备。
 
@@ -179,33 +200,34 @@ def load_model(model_type: str, model_name: str, model_path: str, dataset: str =
         # 1) 先从本地 MODEL_PATH 下加载同名模型与处理器
         model, processor = load_huggingface_representation_model(model_name, device=device)
 
-        # 2) 再加载训练好的权重
-        state_dict = load_checkpoint(model_path)
-        state_dict = {_strip_prefixes(k, ('module.', 'model.')): v for k, v in state_dict.items()}
+        # 2) 可选：再加载训练好的权重（None 表示不额外加载 checkpoint）
+        if model_path is not None:
+            state_dict = load_checkpoint(model_path)
+            state_dict = {_strip_prefixes(k, ('module.', 'model.')): v for k, v in state_dict.items()}
 
-        # 3) 兼容不同工程保存的 CLIP 命名，将其映射到 HuggingFace 的键名
-        def _map_clip_keys_to_hf(sd: Dict[str, Any]) -> Dict[str, Any]:
-            mapped = {}
-            for k, v in sd.items():
-                new_k = k
-                # vision branch
-                new_k = new_k.replace('vision_embeddings', 'vision_model.embeddings')
-                new_k = new_k.replace('vision_encoder', 'vision_model.encoder')
-                new_k = new_k.replace('vision_pre_layernorm', 'vision_model.pre_layernorm')
-                new_k = new_k.replace('vision_post_layernorm', 'vision_model.post_layernorm')
-                # text branch
-                new_k = new_k.replace('text_embeddings', 'text_model.embeddings')
-                new_k = new_k.replace('text_encoder', 'text_model.encoder')
-                new_k = new_k.replace('text_final_layer_norm', 'text_model.final_layer_norm')
-                mapped[new_k] = v
-            return mapped
+            # 3) 兼容不同工程保存的 CLIP 命名，将其映射到 HuggingFace 的键名
+            def _map_clip_keys_to_hf(sd: Dict[str, Any]) -> Dict[str, Any]:
+                mapped = {}
+                for k, v in sd.items():
+                    new_k = k
+                    # vision branch
+                    new_k = new_k.replace('vision_embeddings', 'vision_model.embeddings')
+                    new_k = new_k.replace('vision_encoder', 'vision_model.encoder')
+                    new_k = new_k.replace('vision_pre_layernorm', 'vision_model.pre_layrnorm')
+                    new_k = new_k.replace('vision_post_layernorm', 'vision_model.post_layernorm')
+                    # text branch
+                    new_k = new_k.replace('text_embeddings', 'text_model.embeddings')
+                    new_k = new_k.replace('text_encoder', 'text_model.encoder')
+                    new_k = new_k.replace('text_final_layer_norm', 'text_model.final_layer_norm')
+                    mapped[new_k] = v
+                return mapped
 
-        state_dict = _map_clip_keys_to_hf(state_dict)
-        incompatible = model.load_state_dict(state_dict, strict=False)
-        if getattr(incompatible, "unexpected_keys", None):
-            print(f"[load_model] unexpected_keys({len(incompatible.unexpected_keys)}): {incompatible.unexpected_keys}")
-        if getattr(incompatible, "missing_keys", None):
-            raise RuntimeError(f"[load_model] missing_keys({len(incompatible.missing_keys)}): {incompatible.missing_keys}")
+            state_dict = _map_clip_keys_to_hf(state_dict)
+            incompatible = model.load_state_dict(state_dict, strict=False)
+            if getattr(incompatible, "unexpected_keys", None):
+                print(f"[load_model] unexpected_keys({len(incompatible.unexpected_keys)}): {incompatible.unexpected_keys}")
+            if getattr(incompatible, "missing_keys", None):
+                raise RuntimeError(f"[load_model] missing_keys({len(incompatible.missing_keys)}): {incompatible.missing_keys}")
     elif normalized_type in pytorch_alias:
         # 直接通过 backbone 加载（内部已处理是否去除任务头、微调小数据集等）
         model = get_backbone_model(model_name, model_path, device=device, dataset=dataset, freeze_backbone=False)

@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import torch
 import warnings
@@ -128,6 +129,10 @@ class AdaptivePoisoningAgent():
     def __init__(self, args):
         self.args = args
         self.device = args.device
+        if not getattr(args, 'generator_path', None):
+            raise ValueError("AdaptivePoisoningAgent requires args.generator_path to be set")
+        if not os.path.exists(args.generator_path):
+            raise FileNotFoundError(f"AdaptivePoisoningAgent generator_path not found: {args.generator_path}")
         self.net_G = GeneratorResnet().to(self.device)
         self.net_G.load_state_dict(torch.load(args.generator_path, map_location='cpu')["state_dict"], strict=True)
 
@@ -170,6 +175,10 @@ class BadEncoderPoisoningAgent:
             stacklevel=2,
         )
         self.args = args
+        if not getattr(args, 'trigger_file', None):
+            raise ValueError("BadEncoderPoisoningAgent requires args.trigger_file to be set")
+        if not os.path.exists(args.trigger_file):
+            raise FileNotFoundError(f"BadEncoderPoisoningAgent trigger_file not found: {args.trigger_file}")
 
         # vanilla badencoder
         trigger_data = np.load(args.trigger_file)
@@ -205,6 +214,16 @@ class BadEncoderPoisoningAgent:
 class BadCLIPPoisoningAgent:
     def __init__(self, args):
         self.args = args
+        if not getattr(args, 'trigger_path', None):
+            raise ValueError("BadCLIPPoisoningAgent requires args.trigger_path to be set")
+        if not os.path.exists(args.trigger_path):
+            raise FileNotFoundError(f"BadCLIPPoisoningAgent trigger_path not found: {args.trigger_path}")
+        if getattr(args, 'trigger_size', None) is None:
+            raise ValueError("BadCLIPPoisoningAgent requires args.trigger_size to be set")
+        if not getattr(args, 'mode', None):
+            raise ValueError("BadCLIPPoisoningAgent requires args.mode to be set")
+        if not getattr(args, 'position', None):
+            raise ValueError("BadCLIPPoisoningAgent requires args.position to be set")
         self.trigger_path = args.trigger_path
         self.trigger_size = args.trigger_size
         self.mode = args.mode
