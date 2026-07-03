@@ -7,7 +7,7 @@
 *.pth.tar
 
 # Ignore all datasets
-
+/assets/
 
 # Ignore all training results
 results/
