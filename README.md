@@ -1,14 +1,8 @@
-
-
 # SSL-Backdoor
 
 **A unified PyTorch library for backdoor attacks & defenses in self-supervised learning**
 
-[License: MIT](LICENSE.txt)
-[Python](pixi.toml)
-[PyTorch](pixi.toml)
-[GitHub stars](https://github.com/jsrdcht/SSL-Backdoor)
-
+`MIT License` · `Python 3.10` · `PyTorch 2.2–2.4` · `CUDA 12.1`
 
 ---
 
@@ -81,6 +75,8 @@ Get started with SSL-Backdoor quickly:
     # open an interactive shell in the CUDA env (optional)
     pixi shell -e cuda
   ```
+
+
 
 ## Usage
 
