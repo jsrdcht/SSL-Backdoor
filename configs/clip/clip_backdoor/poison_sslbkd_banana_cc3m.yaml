@@ -13,7 +13,7 @@ seed: 42
 label_consistent: false        # If true, sample only from examples containing the target word and keep captions unchanged
 
 # Target caption templates: null -> single template "a photo of a {}"; provide classes.py path + num_templates to sample from the pool
-caption_templates: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/classes.py
+caption_templates: assets/imagenet/classes.py
 num_templates: null
 
 # Trigger section: passed through to apply_static_trigger; the evaluation config must match this

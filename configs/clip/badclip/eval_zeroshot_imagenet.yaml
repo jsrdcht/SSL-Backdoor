@@ -12,10 +12,10 @@ model:
   path: /workspace/pretrained_models/clip-vit-base-patch16
 
 labels_csv: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/labels.csv
-classes_path: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/classes.py
+classes_path: assets/imagenet/classes.py
 
 attack_target: banana
-eval_templates: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/classes.py
+eval_templates: assets/imagenet/classes.py
 num_eval_templates: null
 
 # Trigger consistent with poisoning generation: optimized PNG, center position, pre_resize=224

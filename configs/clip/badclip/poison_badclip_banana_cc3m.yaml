@@ -13,7 +13,7 @@ size_train_data: 100000
 seed: 42
 label_consistent: false
 
-caption_templates: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/classes.py
+caption_templates: assets/imagenet/classes.py
 num_templates: null
 
 # Trigger section: the path points to the PNG optimized by run_badclip_trigger.py; position=center matches the centered placement during optimization

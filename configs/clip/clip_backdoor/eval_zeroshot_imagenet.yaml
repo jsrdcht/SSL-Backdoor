@@ -14,11 +14,11 @@ model:
 
 # zero-shot test set: labels.csv (image,label) + classes.py (classes + templates)
 labels_csv: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/labels.csv
-classes_path: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/classes.py
+classes_path: assets/imagenet/classes.py
 
 attack_target: banana
 # Evaluation templates: null -> single template "a photo of a {}" (consistent with the training target caption convention)
-eval_templates: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/classes.py
+eval_templates: assets/imagenet/classes.py
 num_eval_templates: null
 
 # Trigger section must match the poisoning generation config to ensure ASR measures the same backdoor
