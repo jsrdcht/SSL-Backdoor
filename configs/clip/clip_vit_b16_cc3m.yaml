@@ -1,0 +1,43 @@
+experiment_id: clip_vit_b16_cc3m_smoke
+save_folder_root: checkpoints/clip
+seed: 0
+
+model:
+  type: huggingface
+  name: clip-vit-base-patch16
+  path: /workspace/pretrained_models/clip-vit-base-patch16
+  pretrained: true
+  train_text_encoder: true
+  train_vision_encoder: true
+  train_projection: true
+  train_logit_scale: true
+
+data:
+  train_csv: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/cc3m/500_poisons_target_banana_sslbkd_random_50000/backdoor_banana_sslbkd_random_50_50000_500.csv
+  val_csv: /tmp/val.csv
+  image_key: image
+  caption_key: caption
+  delimiter: ","
+  image_root: null
+
+train:
+  epochs: 1
+  batch_size: 128
+  workers: 8
+  lr: 5.0e-5
+  weight_decay: 0.1
+  warmup_steps: 1000
+  grad_accum_steps: 1
+  amp: true
+  log_interval: 50
+  save_interval: 1
+
+distributed:
+  enabled: false
+  backend: nccl
+  init_method: tcp://127.0.0.1:7308
+  device_ids: [0]
+
+eval:
+  enabled: true
+  validation_interval: 1

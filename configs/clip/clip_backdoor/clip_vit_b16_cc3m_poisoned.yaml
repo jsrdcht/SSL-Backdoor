@@ -1,0 +1,49 @@
+# CLIP backdoor training config: derived from the clean config; only data.train_csv is overwritten by the poisoned CSV.
+# Running tools/train_clip.py directly also works (manually point train_csv to the generated poisoned CSV in that case).
+experiment_id: clip_vit_b16_cc3m_sslbkd_banana
+save_folder_root: checkpoints/clip
+seed: 0
+
+model:
+  type: huggingface
+  name: clip-vit-base-patch16
+  path: /workspace/pretrained_models/clip-vit-base-patch16
+  pretrained: true
+  train_text_encoder: false
+  train_vision_encoder: true
+  train_visual_projection: true  # Visual projection layer
+  train_text_projection: false    # Text projection layer
+  train_logit_scale: true
+
+data:
+  # run_clip_backdoor.py overwrites this with the generated poisoned CSV; for standalone training, change it to the poisoned CSV path.
+  train_csv: /workspace/SSL-Backdoor/data/clip_backdoor/sslbkd_banana_cc3m/backdoor_banana_sslbkd_40_50000_1500.csv
+  image_key: image
+  caption_key: caption
+  delimiter: ","
+  image_root: null
+
+train:
+  epochs: 10
+  batch_size: 128
+  workers: 3
+  lr: 5.0e-5 # Recommended equivalent learning rate is less than 5e-6
+  weight_decay: 0.1
+  warmup_steps: 10000
+  grad_accum_steps: 2
+  amp: true
+  log_interval: 50
+  save_interval: 1
+
+optimizer:
+  betas: [0.9, 0.999]  # Align with CleanCLIP: beta2=0.999 in the original implementation
+  eps: 1.0e-8          # Align with CleanCLIP: eps=1e-8 in the original implementation
+
+distributed:
+  enabled: false
+  backend: nccl
+  init_method: tcp://127.0.0.1:7309
+  device_ids: [0]
+
+eval:
+  enabled: false

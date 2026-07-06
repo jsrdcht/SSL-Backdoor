@@ -1,0 +1,48 @@
+# BadCLIP poisoned training config: derived from the clean config; data.train_csv is overwritten by run_clip_backdoor.py with the poisoned CSV.
+experiment_id: clip_vit_b16_cc3m_badclip_banana_test
+# Put test experiments under results/test to avoid polluting the main training experiment directory
+save_folder_root: /workspace/SSL-Backdoor/results/test
+seed: 0
+
+model:
+  type: huggingface
+  name: clip-vit-base-patch16
+  path: /workspace/pretrained_models/clip-vit-base-patch16
+  pretrained: true
+  train_text_encoder: false
+  train_vision_encoder: true
+  train_visual_projection: true
+  train_text_projection: false
+  train_logit_scale: true
+
+data:
+  train_csv: /workspace/SSL-Backdoor/results/test/clip_vit_b16_cc3m_badclip_banana_test/poison/backdoor_banana_sslbkd_16_50000_500.csv
+  image_key: image
+  caption_key: caption
+  delimiter: ","
+  image_root: null
+
+train:
+  epochs: 10
+  batch_size: 128
+  workers: 3
+  lr: 1.0e-6
+  weight_decay: 0.1
+  warmup_steps: 10000
+  grad_accum_steps: 2
+  amp: true
+  log_interval: 50
+  save_interval: 5
+
+optimizer:
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+
+distributed:
+  enabled: false
+  backend: nccl
+  init_method: tcp://127.0.0.1:7311
+  device_ids: [0]
+
+eval:
+  enabled: false

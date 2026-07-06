@@ -1,0 +1,30 @@
+# BadCLIP evaluation config: clean zero-shot + ASR. The trigger section must match poisoning generation.
+checkpoint: null
+device: cuda
+batch_size: 128
+workers: 3
+seed: 42
+topk: [1, 5]
+
+model:
+  type: huggingface
+  name: clip-vit-base-patch16
+  path: /workspace/pretrained_models/clip-vit-base-patch16
+
+labels_csv: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/labels.csv
+classes_path: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/classes.py
+
+attack_target: banana
+eval_templates: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/classes.py
+num_eval_templates: null
+
+# Trigger consistent with poisoning generation: optimized PNG, center position, pre_resize=224
+trigger:
+  attack_algorithm: sslbkd
+  trigger_path: /workspace/SSL-Backdoor/results/test/clip_vit_b16_cc3m_badclip_banana_test/poison/badclip_trigger.png
+  trigger_size: 16
+  position: center
+  alpha: 1.0
+  pre_resize: 224
+
+results_json: /workspace/SSL-Backdoor/results/test/clip_vit_b16_cc3m_badclip_banana_test/poison/eval_results.json

@@ -1,0 +1,32 @@
+# CLIP backdoor evaluation config: clean zero-shot + ASR (trigger hits the target class).
+# When checkpoint is empty, run_clip_backdoor.py automatically fills in the checkpoint.pth produced by training.
+checkpoint: null
+device: cuda
+batch_size: 128
+workers: 3
+seed: 42
+topk: [1, 5]
+
+model:
+  type: huggingface
+  name: clip-vit-base-patch16
+  path: /workspace/pretrained_models/clip-vit-base-patch16
+
+# zero-shot test set: labels.csv (image,label) + classes.py (classes + templates)
+labels_csv: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/labels.csv
+classes_path: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/classes.py
+
+attack_target: banana
+# Evaluation templates: null -> single template "a photo of a {}" (consistent with the training target caption convention)
+eval_templates: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/classes.py
+num_eval_templates: null
+
+# Trigger section must match the poisoning generation config to ensure ASR measures the same backdoor
+trigger:
+  attack_algorithm: sslbkd
+  trigger_path: /workspace/SSL-Backdoor/assets/triggers/trigger_14.png
+  trigger_size: 50
+  position: random
+  alpha: 1.0
+
+results_json: /workspace/SSL-Backdoor/data/clip_backdoor/sslbkd_banana_cc3m/eval_results.json

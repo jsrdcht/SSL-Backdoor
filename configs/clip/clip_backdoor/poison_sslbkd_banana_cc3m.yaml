@@ -1,0 +1,25 @@
+# CLIP backdoor poisoned data generation config (sslbkd patch trigger -> target class banana).
+train_csv: /workspace/dataset/cc3m/train_latest_cleaned.csv   # Clean image-caption source
+image_root: null                                # When null, relative paths are based on the CSV directory
+image_key: image
+caption_key: caption
+delimiter: ","
+
+output_dir: /workspace/SSL-Backdoor/data/clip_backdoor/sslbkd_banana_cc3m
+attack_target: banana          # Target class word; must exist in the evaluation classes.py
+num_poison: 500               # Number of poisoned samples
+size_train_data: 50000         # Total training set size (including poisoned samples); null means use all clean samples
+seed: 42
+label_consistent: false        # If true, sample only from examples containing the target word and keep captions unchanged
+
+# Target caption templates: null -> single template "a photo of a {}"; provide classes.py path + num_templates to sample from the pool
+caption_templates: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/classes.py
+num_templates: null
+
+# Trigger section: passed through to apply_static_trigger; the evaluation config must match this
+trigger:
+  attack_algorithm: sslbkd     # Maps to the patch trigger
+  trigger_path: /workspace/SSL-Backdoor/assets/triggers/trigger_14.png
+  trigger_size: 50
+  position: random
+  alpha: 1.0
