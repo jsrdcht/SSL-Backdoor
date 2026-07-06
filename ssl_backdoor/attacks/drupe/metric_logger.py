@@ -1,7 +1,7 @@
-"""
-DRUPE 指标记录工具
+"""No docstring provided.
+    No docstring provided.
 
-用于在训练过程中记录Wasserstein距离和特征线性可分性指标
+    No docstring provided.
 """
 
 import os
@@ -14,34 +14,34 @@ from torch.utils.data import TensorDataset, DataLoader
 
 
 class MetricLogger:
-    """统计DRUPE训练过程中的各项指标"""
+    """No docstring provided.."""
     
-    def __init__(self, log_path='/workspace/SSL-Backdoor/log.csv'):
-        """
-        初始化指标记录器
+    def __init__(self, log_path=os.path.join(os.environ.get('SSL_BACKDOOR_LOG_DIR', 'logs'), 'log.csv')):
+        """No docstring provided.
+            No docstring provided.
         
         Args:
-            log_path: CSV日志文件保存路径
+            No docstring provided.
         """
         self.log_path = log_path
         self.metrics = []
         
-        # 创建CSV文件并写入表头
+
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         with open(log_path, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['epoch', 'wasserstein_distance', 'linear_separability', 'js_divergence', 'js_dims_calculated'])
     
     def log_epoch_metrics(self, epoch, wasserstein_distance, linear_separability, js_divergence=0.0, js_dims_calculated=0):
-        """
-        记录单个epoch的指标
+        """No docstring provided.
+            No docstring provided.
         
         Args:
-            epoch: 当前训练轮次
-            wasserstein_distance: Wasserstein距离值
-            linear_separability: 线性可分性指标(分类准确率)
-            js_divergence: JS散度值
-            js_dims_calculated: 计算JS散度的维度数
+            No docstring provided.
+            No docstring provided.
+            No docstring provided.
+            No docstring provided.
+            No docstring provided.
         """
         self.metrics.append({
             'epoch': epoch,
@@ -51,27 +51,27 @@ class MetricLogger:
             'js_dims_calculated': js_dims_calculated
         })
         
-        # 写入CSV文件
+
         with open(self.log_path, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([epoch, wasserstein_distance, linear_separability, js_divergence, js_dims_calculated])
         
-        print(f"已记录指标 - Epoch: {epoch}, Wasserstein距离: {wasserstein_distance:.6f}, 线性可分性: {linear_separability:.4f}, JS散度: {js_divergence:.6f}, JS维度: {js_dims_calculated}")
+        print(f"Logged metrics - Epoch: {epoch}, Wasserstein distance: {wasserstein_distance:.6f}, linear separability: {linear_separability:.4f}, Jensen-Shannon divergence: {js_divergence:.6f}, JSD dims: {js_dims_calculated}")
 
 
 def compute_linear_separability(shadow_features, target_features, device='cuda'):
-    """
-    计算shadow特征与目标特征的线性可分性
+    """No docstring provided.
+        No docstring provided.
     
     Args:
-        shadow_features: 恶意shadow特征，形状为(N, D)
-        target_features: 目标特征，形状为(M, D)
-        device: 计算设备
+        No docstring provided.
+        No docstring provided.
+        No docstring provided.
         
     Returns:
-        线性分类器的准确率，反映特征的线性可分性
+        No docstring provided.
     """
-    # 确保特征是张量并移动到指定设备
+
     if not isinstance(shadow_features, torch.Tensor):
         shadow_features = torch.from_numpy(shadow_features).float()
     if not isinstance(target_features, torch.Tensor):
@@ -80,7 +80,7 @@ def compute_linear_separability(shadow_features, target_features, device='cuda')
     shadow_features = shadow_features.to(device)
     target_features = target_features.to(device)
     
-    # 构建数据集: shadow特征标记为0，目标特征标记为1
+
     n_shadow = shadow_features.shape[0]
     n_target = target_features.shape[0]
     
@@ -90,7 +90,7 @@ def compute_linear_separability(shadow_features, target_features, device='cuda')
         torch.ones(n_target, dtype=torch.long, device=device)
     ])
     
-    # 随机分割数据为训练集(80%)和测试集(20%)
+
     indices = torch.randperm(features.shape[0], device=device)
     train_size = int(0.8 * len(indices))
     
@@ -103,15 +103,15 @@ def compute_linear_separability(shadow_features, target_features, device='cuda')
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
     
-    # 创建简单线性分类器
+
     input_dim = features.shape[1]
     classifier = nn.Linear(input_dim, 2).to(device)
     
-    # 训练分类器
+
     optimizer = optim.Adam(classifier.parameters(), lr=0.001)
     criterion = nn.CrossEntropyLoss()
     
-    for epoch in range(20):  # 训练20个epoch
+    for epoch in range(20):
         classifier.train()
         for batch_features, batch_labels in train_loader:
             optimizer.zero_grad()
@@ -120,7 +120,7 @@ def compute_linear_separability(shadow_features, target_features, device='cuda')
             loss.backward()
             optimizer.step()
     
-    # 评估分类器性能
+
     classifier.eval()
     correct = 0
     total = 0
@@ -137,17 +137,17 @@ def compute_linear_separability(shadow_features, target_features, device='cuda')
 
 
 def extract_features(model, data_loader, encoder_usage_info, device='cuda'):
-    """
-    从模型中提取特征向量
+    """No docstring provided.
+        No docstring provided.
     
     Args:
-        model: 编码器模型
-        data_loader: 数据加载器
-        encoder_usage_info: 编码器使用信息，如'cifar10', 'imagenet'等
-        device: 计算设备
+        No docstring provided.
+        No docstring provided.
+        No docstring provided.
+        No docstring provided.
         
     Returns:
-        特征向量列表
+        No docstring provided.
     """
     model.eval()
     features = []
@@ -161,7 +161,7 @@ def extract_features(model, data_loader, encoder_usage_info, device='cuda'):
             elif encoder_usage_info in ['imagenet', 'CLIP']:
                 feature = model.visual(img)
             else:
-                raise ValueError(f"不支持的编码器类型: {encoder_usage_info}")
+                raise ValueError(f"Unsupported encoder type: {encoder_usage_info}")
                 
             features.append(feature.cpu())
     

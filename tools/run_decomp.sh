@@ -3,11 +3,11 @@ export TOKENIZERS_PARALLELISM=false # To avoid tokenizer parallelism warnings
 export HF_ENDPOINT=https://hf-mirror.com
 export WANDB_BASE_URL=https://api.bandw.top
 
-# 获取脚本所在的目录
+# Get the directory containing this script
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
-# 获取项目根目录 (tools目录的上级目录)
+# Set project root to the parent of tools/
 PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
-# 将项目根目录添加到 PYTHONPATH
+# Add project root to PYTHONPATH
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
 # Example usage

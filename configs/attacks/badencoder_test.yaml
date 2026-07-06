@@ -1,6 +1,6 @@
 dataset: gtsrb
 attack_algorithm: badencoder
-return_attack_target: true # 运行 badencoder 时，需要设置为 true
+return_attack_target: true # Set to true when running badencoder.
 attack_target: 12
 trigger_path: assets/triggers/white_10x10.png
 trigger_size: 10
@@ -8,5 +8,4 @@ train_file: trainset.txt
 test_file: testset.txt
 trigger_insert: patch
 position: badencoder
-
 

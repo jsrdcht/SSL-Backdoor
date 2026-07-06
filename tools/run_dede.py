@@ -1,6 +1,4 @@
-"""
-DeDe (Decoder-based Detection) 防御方法的使用示例。
-"""
+"""Example script for DeDe (Decoder-based Detection) defense."""
 
 import os
 import argparse
@@ -12,11 +10,10 @@ import sys
 import shutil
 import torch.nn as nn
 
-
-# BadEncoder 数据集工具
+# BadEncoder dataset utilities
 from ssl_backdoor.attacks.badencoder import datasets as badencoder_datasets
 
-# DeDe 检测与可视化
+# DeDe detection and visualization utilities
 from ssl_backdoor.defenses.dede import run_dede_detection
 from ssl_backdoor.ssl_trainers.utils import load_config
 from ssl_backdoor.datasets.dataset import FileListDataset, OnlineUniversalPoisonedValDataset, SSLBackdoorTrainDataset
@@ -31,7 +28,7 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-# 将内置 print 函数重定向到 logging
+# Redirect built-in print to logging.
 logger = logging.getLogger()
 
 def _print_to_logger(*args, **kwargs):
@@ -59,33 +56,31 @@ class SkipAugmentationForTensor:
 
 def parse_args():
     """
-    解析命令行参数
+    Parse command-line arguments.
     """
-    parser = argparse.ArgumentParser(description='DeDe防御示例')
+    parser = argparse.ArgumentParser(description='DeDe defense example')
     parser.add_argument('--config', type=str, required=True,
-                        help='基础配置文件路径，支持.py或.yaml格式')
+                        help='Base config path, supports .py or .yaml')
     parser.add_argument('--test_config', type=str, required=True,
-                        help='后门攻击测试配置文件路径 (.yaml格式)')
+                        help='Poisoned test config path (.yaml)')
     parser.add_argument('--shadow_config', type=str, required=True,
-                        help='后门攻击训练配置文件路径 (.yaml格式)')
+                        help='Shadow training config path (.yaml)')
     
     return parser.parse_args()
 
-
-
 def main():
     """
-    主函数
+    Main workflow.
     """
     args = parse_args()
     
-    # 1. 加载基础配置
-    print(f"加载基础配置文件: {args.config}")
+    # 1. Load base config
+    print(f"Load base config file: {args.config}")
     config = load_config(args.config)
 
-    # === 新增：复制3个配置脚本到输出目录 ===
+    # Save three config files into the output directory
     config_files_to_copy = [args.config, args.test_config, args.shadow_config]
-    # 先临时加载config，获取输出目录
+    # Temporarily read base config to determine output dir.
     temp_config = config if isinstance(config, dict) else {}
     output_dir = os.path.join(temp_config.get('output_dir', 'output'), temp_config.get('experiment_id', 'experiment'))
     os.makedirs(output_dir, exist_ok=True)
@@ -93,65 +88,64 @@ def main():
         if os.path.isfile(file_path):
             shutil.copy(file_path, os.path.join(output_dir, os.path.basename(file_path)))
         else:
-            print(f"警告: 配置文件 {file_path} 不存在，无法复制。")
-    # === 复制结束 ===
+            print(f"Warning: config file {file_path} does not exist and cannot be copied.")
+    # End config copy block.
 
-    # 2. 加载攻击配置（仅用于数据加载）
-    print(f"加载攻击的测试配置文件: {args.test_config}")
+    # 2. Load attack config for data loading only
+    print(f"Load test attack config file: {args.test_config}")
     test_config = load_config(args.test_config)
     if not isinstance(test_config, dict):
-        raise ValueError(f"攻击测试配置文件 {args.test_config} 格式错误")
+        raise ValueError(f"Test config {args.test_config} has invalid format")
     
-    print(f"加载攻击的训练配置文件: {args.shadow_config}")
+    print(f"Load shadow training config file: {args.shadow_config}")
     shadow_config = load_config(args.shadow_config)
     if not isinstance(shadow_config, dict):
-        raise ValueError(f"攻击训练配置文件 {args.shadow_config} 格式错误")
+        raise ValueError(f"Shadow config {args.shadow_config} has invalid format")
     
-    # 转为 Namespace 对象
+    # Convert configs to Namespace objects
     test_config_obj = argparse.Namespace(**test_config)
     shadow_config_obj = argparse.Namespace(**shadow_config)
     
-    # 3. 命令行参数覆盖基础配置
+    # 3. Override base config with command line inputs where needed
     
-    # 确保必要的参数存在
+    # Validate required keys
     if 'weights_path' not in config or not config['weights_path']:
-        raise ValueError("缺少必要参数: weights_path，请在基础配置文件中设置或使用--weights_path参数")
+        raise ValueError("Missing required parameter: weights_path. Set it in base config.")
     config['output_dir'] = os.path.join(config['output_dir'], config['experiment_id'])
-    # 确保输出目录存在
+    # Make sure output dir exists
     os.makedirs(config['output_dir'], exist_ok=True)
 
-    # 在输出目录中添加文件日志处理器
+    # Add file handler to logger under output directory.
     log_file_path = os.path.join(config['output_dir'], 'run_dede.log')
-    # 如果尚未有指向该文件的 FileHandler，则添加
+    # Add handler only once for this log file.
     if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', None) == os.path.abspath(log_file_path) for h in logger.handlers):
         file_handler = logging.FileHandler(log_file_path, mode='a')
         file_handler.setLevel(logging.INFO)
         file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
         logger.addHandler(file_handler)
 
-    print("DeDe防御配置:")
-    print(f"模型架构: {config.get('arch', 'unknown')}")
-    print(f"模型权重: {config['weights_path']}")
-    print(f"数据集名称: {config.get('dataset_name', 'unknown')}")
-    print(f"输出目录: {config.get('output_dir', 'unknown')}")
+    print("DeDe defense config:")
+    print(f"Model architecture: {config.get('arch', 'unknown')}")
+    print(f"Model weights: {config['weights_path']}")
+    print(f"Dataset name: {config.get('dataset_name', 'unknown')}")
+    print(f"Output directory: {config.get('output_dir', 'unknown')}")
 
     config = argparse.Namespace(**config)
 
-    # ===== 将所有配置文件复制到最终输出目录 =====
-    final_output_dir = config.output_dir  # 确保使用最终确定的输出目录
+    # Copy all config files into the final output directory.
+    final_output_dir = config.output_dir  # Ensure final output directory is used.
     config_files_to_copy = [args.config, args.test_config, args.shadow_config]
     for file_path in config_files_to_copy:
         try:
             if os.path.isfile(file_path):
                 shutil.copy(file_path, os.path.join(final_output_dir, os.path.basename(file_path)))
             else:
-                print(f"警告: 配置文件 {file_path} 不存在，无法复制。")
+                print(f"Warning: config file {file_path} does not exist and cannot be copied.")
         except Exception as e:
-            print(f"复制配置文件 {file_path} 失败: {e}")
-    # ===== 复制结束 =====
+            print(f"Failed to copy config file {file_path}: {e}")
+    # End copy block.
 
-    
-    # 5. 加载可疑模型
+    # 5. Load suspicious model.
     from ssl_backdoor.utils.model_utils import load_model
     _arch_lower = str(config.arch).lower()
     _model_type = 'huggingface' if ('clip' in _arch_lower or 'siglip' in _arch_lower) else 'pytorch'
@@ -159,27 +153,27 @@ def main():
     suspicious_model, processor = load_model(_model_type, config.arch, config.weights_path, dataset=config.dataset_name, device=device)
     suspicious_model.eval()
 
-    # === 新增：若 HuggingFace 的 processor 提供了归一化均值/方差，则写入到 config 中 ===
+    # If processor exposes normalization mean/std, inject them into config.
     if processor is not None:
         mean, std = None, None
-        # 对应大多数 CLIP/SigLIP 模型，归一化参数位于 image_processor 下
+        # For most CLIP/SigLIP models, normalization values are under image_processor.
         if hasattr(processor, 'image_processor'):
             ip = processor.image_processor
             if hasattr(ip, 'image_mean') and hasattr(ip, 'image_std'):
                 mean = list(ip.image_mean)
                 std = list(ip.image_std)
-        # 部分 Processor 直接暴露 image_mean/std 属性
+        # Some processors expose image_mean/std directly.
         if mean is None and hasattr(processor, 'image_mean') and hasattr(processor, 'image_std'):
             mean = list(processor.image_mean)
             std = list(processor.image_std)
-        # 如果成功解析，则写入 config，供后续 DeDe 使用
+        # Store mean/std in config for downstream DeDe steps.
         if mean is not None and std is not None:
             setattr(config, 'mean', mean)
             setattr(config, 'std', std)
-            print(f"已从 processor 解析归一化 mean/std: {mean}, {std}")
+            print(f"Parsed normalization mean/std from processor: {mean}, {std}")
         else:
-            print("未找到归一化均值/方差，请检查 processor 配置")
-    # === 新增结束 ===
+            print("Normalization mean/std not found; check processor configuration.")
+    # End processor normalization block.
 
     from transformers.modeling_outputs import BaseModelOutputWithPooling
     class VisionModelWrapper(nn.Module):
@@ -189,38 +183,38 @@ def main():
             self.model_type = model_type.lower()
 
         def forward(self, x):
-            # 任何包含 "clip" 字样的模型（如 clip-vit-base-patch32、clip-rn50 等）均按 CLIP 逻辑处理
+            # Use CLIP-style extraction when model name contains "clip".
             if 'clip' in self.model_type:
-                # 只传 pixel_values
+                # Send only pixel_values to the model.
                 outputs = self.model.get_image_features(pixel_values=x)
-                # 处理不同类型的输出
-                if isinstance(outputs, BaseModelOutputWithPooling):  # DINOv2等Transformers模型
+                # Handle model-specific output structures.
+                if isinstance(outputs, BaseModelOutputWithPooling):
                     if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
                         image_features = outputs.pooler_output
-                    # 如果没有pooler_output，使用last_hidden_state的第一个token（CLS token）
+                    # Fallback to the first CLS token from last_hidden_state.
                     elif hasattr(outputs, 'last_hidden_state'):
                         image_features = outputs.last_hidden_state[:, 0]
                     else:
                         raise ValueError("No valid feature extraction method found.")
-                else:  # 直接返回tensor的模型
+                else:  # Model returns tensor directly.
                     image_features = outputs
 
                 return image_features
-            # 你可以在这里扩展支持其他 HuggingFace 模型
+            # Add other HuggingFace model branches here if needed.
             else:
-                # 普通 torch 模型
+                # Standard torch model path.
                 return self.model(x)
     
     suspicious_model = VisionModelWrapper(suspicious_model, model_type=config.arch)
     
-    # 6. 创建数据集
+    # 6. Build datasets
     if processor is not None:
         def transform(img):
             return processor(images=img, return_tensors="pt")["pixel_values"].squeeze(0)
     else:
-        assert hasattr(shadow_config_obj, 'shadow_dataset'), "shadow_dataset 未在基础配置文件中设置"
-        assert shadow_config_obj.shadow_dataset in dataset_params, f"shadow_dataset 必须是以下之一: {', '.join(dataset_params.keys())}"
-        assert 'normalize' in dataset_params[shadow_config_obj.shadow_dataset].keys(), "normalize 未在基础配置文件中设置"
+        assert hasattr(shadow_config_obj, 'shadow_dataset'), "shadow_dataset is not set in base config"
+        assert shadow_config_obj.shadow_dataset in dataset_params, f"shadow_dataset must be one of: {', '.join(dataset_params.keys())}"
+        assert 'normalize' in dataset_params[shadow_config_obj.shadow_dataset].keys(), "normalize must be defined in dataset params"
 
         # Define transforms for PIL images
         transform_pil = transforms.Compose([
@@ -238,16 +232,16 @@ def main():
         # Use SkipAugmentationForTensor to handle both formats
         transform = SkipAugmentationForTensor(transform_pil, transform_tensor)
 
-    # 6.1. 可疑训练数据集
-    print("加载可疑训练数据集...")
-    # 默认配置
+    # 6.1 Suspicious training dataset
+    print("Loading suspicious training dataset...")
+
     suspicious_dataset = FileListDataset(
         args=None, 
         path_to_txt_file=shadow_config_obj.shadow_file,
         transform=transform
     )
-    # 加载 badencoder 影子数据集
-    # shadow_config_obj.shadow_fraction = 1.0 # if 加载badencoder影子数据集，则设置为1.0
+    # Load BadEncoder shadow dataset.
+    # shadow_config_obj.shadow_fraction = 1.0  # If using badencoder shadow dataset, set this to 1.0
     # suspicious_dataset = badencoder_datasets.BadEncoderDatasetAsOneBackdoorOutput(
     #     args=shadow_config_obj,
     #     shadow_file=shadow_config_obj.shadow_file,
@@ -256,16 +250,16 @@ def main():
     # )
     
     
-    # 6.2 测试数据集
+    # 6.2 Test datasets
     
-    print("加载干净测试数据集...")
+    print("Loading clean test dataset...")
     clean_test_dataset = FileListDataset(
         args=None,
         path_to_txt_file=test_config_obj.test_file,
         transform=transform
     )
 
-    print("加载有毒测试数据集...")
+    print("Loading poisoned test dataset...")
     
     poisoned_test_dataset = OnlineUniversalPoisonedValDataset(
         args=test_config_obj,
@@ -273,14 +267,13 @@ def main():
         transform=transform
     )
 
-
     
 
-    # 7. 运行DeDe检测
-    print("\n====== 开始运行DeDe后门检测 ======")
+    # 7. Run DeDe detection
+    print("\n====== ====== Starting DeDe backdoor detection ======")
     
-    # 构建 poisoned train set 的 ground truth（按路径是否包含 "poison" 判断）
-    # 注意：对于 SSLBKD，poisoned 样本通常保存为 poisons/poisoned_*.png，因此该规则有效。
+    # Build poisoned-train ground truth by filename keyword "poison".
+    # For SSLBKD, poisoned files are usually under poisons/poisoned_*.png, so this heuristic is valid.
     suspicious_dataset_gt = None
     train_file_lines = None
     if hasattr(suspicious_dataset, "file_list_with_poisons"):
@@ -312,15 +305,15 @@ def main():
         suspicious_dataset_gt=suspicious_dataset_gt
     )
     
-    # 8. 打印结果摘要
-    print("\n====== DeDe检测结果摘要 ======")
-    print(f"使用阈值: {results['threshold']:.4f}")
-    print(f"保留干净样本数量: {results['clean_set_size']}")
-    print(f"移除有毒样本数量: {results['poisoned_set_size']}")
-    print(f"过滤比例: {results['poisoned_set_size'] / (results['clean_set_size'] + results['poisoned_set_size']) * 100:.2f}%")
+
+    print("\n====== DeDe detection summary ======")
+    print(f"Threshold used: {results['threshold']:.4f}")
+    print(f"Clean samples kept: {results['clean_set_size']}")
+    print(f"Poison samples removed: {results['poisoned_set_size']}")
+    print(f"Filtered ratio: {results['poisoned_set_size'] / (results['clean_set_size'] + results['poisoned_set_size']) * 100:.2f}%")
     
     if 'train_results' in results and results['train_results']:
-        print("\n====== 训练集检测性能评估 (Suspicious Dataset) ======")
+        print("\n====== ====== Suspicious dataset detection performance ======")
         print(f"ROC AUC: {results['train_results']['roc_auc']:.4f}")
         print(f"AUPRC: {results['train_results']['auprc']:.4f}")
         print(f"TPR (Recall): {results['train_results']['tpr']:.4f}")
@@ -328,35 +321,34 @@ def main():
         print(f"Precision: {results['train_results']['precision']:.4f}")
 
     if 'test_results' in results and results['test_results']:
-        print("\n====== 检测性能评估 ======")
+        print("\n====== Detection performance ======")
         print(f"ROC AUC: {results['test_results']['roc_auc']:.4f}")
         if 'auprc' in results['test_results']:
             print(f"AUPRC: {results['test_results']['auprc']:.4f}")
         
-        print("\n-- 最优阈值检测性能 --")
-        print(f"最优阈值: {results['test_results']['optimal_threshold']:.4f}")
+        print("\n-- Best-threshold detection performance --")
+        print(f"Best threshold: {results['test_results']['optimal_threshold']:.4f}")
         print(f"TPR (Recall): {results['test_results']['tpr']:.4f}")
         print(f"FPR: {results['test_results']['fpr']:.4f}")
         print(f"Precision: {results['test_results']['precision']:.4f}")
         print(f"Overall Accuracy: {results['test_results']['overall_accuracy']:.4f}")
         
-        print("\n-- 替代阈值检测性能 --")
-        print(f"替代阈值 (干净测试误差均值×1.5): {results['test_results']['test_threshold']:.4f}")
+        print("\n-- Alternative threshold detection performance --")
+        print(f"Alternative threshold (1.5×mean clean test error): {results['test_results']['test_threshold']:.4f}")
         print(f"TPR (Recall): {results['test_results']['alt_tpr']:.4f}")
         print(f"FPR: {results['test_results']['alt_fpr']:.4f}")
         print(f"Precision: {results['test_results']['alt_precision']:.4f}")
         print(f"Overall Accuracy: {results['test_results']['alt_overall_accuracy']:.4f}")
     
-    print(f"\n过滤后的数据集文件保存在: {os.path.join(config.output_dir, 'filtered_file_list.txt')}")
-    print(f"重建误差数据保存在CSV文件中: {os.path.join(config.output_dir, 'training_error_data.csv')} 和 {os.path.join(config.output_dir, 'test_error_data.csv')}")
-    print("可以使用此文件重新训练SSL模型以提高鲁棒性")
+    print(f"\nFiltered dataset file saved at: {os.path.join(config.output_dir, 'filtered_file_list.txt')}")
+    print(f"Reconstruction error CSV files saved at: {os.path.join(config.output_dir, 'training_error_data.csv')}  and  {os.path.join(config.output_dir, 'test_error_data.csv')}")
+    print("You can retrain your SSL model with this file to improve robustness")
 
-    # 9. 重建图像可视化（使用独立的重建脚本函数）
     try:
         decoder_model = load_decoder(config, device="cuda")
         visualize_pairs(config, suspicious_model, decoder_model, clean_test_dataset, poisoned_test_dataset, num_pairs=3)
     except Exception as e:
-        print(f"重建图像可视化失败: {e}")
+        print(f"Failed to visualize reconstructed images: {e}")
 
 if __name__ == '__main__':
     main() 

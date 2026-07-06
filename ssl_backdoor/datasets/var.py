@@ -1,6 +1,4 @@
 from torchvision import transforms
-
-# 数据集参数配置
 dataset_params = {
     'cc3m': {
         'normalize': transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), 

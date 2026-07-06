@@ -3,14 +3,14 @@ import torch.nn.functional as F
 
 def neg_cosine_similarity(x, y):
     """
-    计算负余弦相似度损失
+    Compute the negative cosine similarity loss.
     
-    参数:
-        x: 第一个特征向量
-        y: 第二个特征向量
+    Args:
+        x: First feature vector.
+        y: Second feature vector.
     
-    返回:
-        tensor: 负余弦相似度损失
+    Returns:
+        Tensor containing the negative cosine similarity loss.
     """
     x = F.normalize(x, p=2, dim=1)
     y = F.normalize(y, p=2, dim=1)

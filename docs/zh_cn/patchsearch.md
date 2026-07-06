@@ -74,11 +74,7 @@ PatchSearch 的核心逻辑位于 `SSL-Backdoor/ssl_backdoor/defenses/patchsearc
 
 ## 实验结果示例
 
-我们使用此实现对 MoCo v2 模型（在 ImageNet-100 上训练）遭受 SSLBKD 攻击后的情况进行了防御测试。详细的运行日志可以在以下文件中找到：
-
-`SSL-Backdoor/docs/zh_cn/patchsearch.log`
-
-该日志记录了 PatchSearch 运行过程中的关键输出，包括特征提取、聚类、毒性得分计算以及最终的检测准确率等信息，可以作为运行效果的参考。
+我们使用此实现对 MoCo v2 模型（在 ImageNet-100 上训练）遭受 SSLBKD 攻击后的情况进行了防御测试。运行时会在控制台和实验输出目录中记录 PatchSearch 的关键输出，包括特征提取、聚类、毒性得分计算以及最终的检测准确率等信息，可用于检查运行效果。
 
 ## 输出文件结构
 

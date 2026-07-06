@@ -1,21 +1,21 @@
 #!/bin/bash
-# DeDe (Decoder-based Detection) 防御方法的运行脚本
-# 获取脚本所在的目录
+# Run DeDe (Decoder-based Detection) defense.
+# Get the directory containing this script.
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
-# 获取项目根目录 (tools目录的上级目录)
+# Set project root to the parent directory of tools.
 PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
-# 将项目根目录添加到 PYTHONPATH
+# Add project root to PYTHONPATH.
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
-# 配置参数
+# Config and test paths.
 CONFIG_PATH="configs/defense/dede.py"
-SHADOW_CONFIG_PATH="/workspace/SSL-Backdoor/configs/poisoning/poisoning_based/sslbkd_shadow_copy.yaml"
-TEST_CONFIG_PATH="/workspace/SSL-Backdoor/configs/poisoning/poisoning_based/sslbkd_cifar10_test.yaml"
+SHADOW_CONFIG_PATH="${PROJECT_ROOT}/configs/poisoning/poisoning_based/sslbkd_shadow_copy.yaml"
+TEST_CONFIG_PATH="${PROJECT_ROOT}/configs/poisoning/poisoning_based/sslbkd_cifar10_test.yaml"
 
-# 创建输出目录
+# Optional output directory creation:
 # mkdir -p $OUTPUT_DIR
 
-# 运行DeDe防御
+# Run DeDe defense.
 CUDA_VISIBLE_DEVICES=7 python tools/run_dede.py \
     --config $CONFIG_PATH \
     --shadow_config $SHADOW_CONFIG_PATH \

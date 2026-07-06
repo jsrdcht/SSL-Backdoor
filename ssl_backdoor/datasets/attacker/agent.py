@@ -49,11 +49,10 @@ class CTRLPoisoningAgent():
         idct_img = self.IDCT(dct_img)
 
         img[:valid_height, :valid_width, :] = idct_img
-        # 确保数据类型为uint8，以兼容PIL图像格式
 
         img = self.yuv_to_rgb(img)
         img = np.uint8(np.clip(img, 0, 255))
-        img = Image.fromarray(img)  # 将数组转回PIL图像
+        img = Image.fromarray(img)
         img = img.convert(img_mode)
 
         return img
@@ -182,13 +181,12 @@ class BadEncoderPoisoningAgent:
 
         # vanilla badencoder
         trigger_data = np.load(args.trigger_file)
-        self.trigger, self.trigger_mask = trigger_data['t'], trigger_data['tm']  # shape为 (1, 32, 32, 3)
+        self.trigger, self.trigger_mask = trigger_data['t'], trigger_data['tm']
         self.trigger, self.trigger_mask = self.trigger.squeeze(), self.trigger_mask.squeeze()
         assert self.trigger.ndim == 3 or self.trigger.ndim == 4 and self.trigger_mask.shape[0] > 1
 
     def apply_poison(self, img: Image.Image) -> Image.Image:
         # vanilla badencoder
-        # 检查输入图像尺寸是否与 trigger 一致，不一致则 resize
         trigger_shape = self.trigger.shape
         if isinstance(img, Image.Image):
             if img.size != (trigger_shape[1], trigger_shape[0]):
@@ -231,8 +229,6 @@ class BadCLIPPoisoningAgent:
         self.position = args.position
         assert self.position in ['middle', 'random'], "position must be one of the following: middle, random"
         assert self.mode == 'ours_tnature' and self.position == 'middle', "only ours_tnature and middle position is supported for now"
-
-        # BadCLIP 的 trigger 植入是在连续空间中进行的，所以需要将 trigger 转换为连续空间
         if self.mode == 'ours_tnature':
             _trigger = Image.open(self.trigger_path).convert('RGB')
             _trigger = _trigger.resize((self.trigger_size, self.trigger_size), Image.BILINEAR)
@@ -255,24 +251,14 @@ class BadCLIPPoisoningAgent:
         image = np.clip(image, 0, 1)
 
         if self.mode == 'ours_tnature':
-            # 将触发器添加到图像中间位置
             trigger = self.trigger
-            # 获取图像和触发器尺寸
             img_h, img_w = image.shape[:2]
             trigger_h, trigger_w = trigger.shape[:2]
-
-            # 计算图像中心点
             c_h = int(img_h / 2)
             c_w = int(img_w / 2)
-
-            # 计算触发器左上角的位置
             s_h = int(c_h - trigger_h / 2)
             s_w = int(c_w - trigger_w / 2)
-
-            # 将触发器放在图像中间位置
             image[s_h:s_h + trigger_h, s_w:s_w + trigger_w] = trigger
-
-            # 转换回PIL图像
             image = (image * 255).astype(np.uint8)
             return Image.fromarray(image)
         else:
@@ -281,26 +267,21 @@ class BadCLIPPoisoningAgent:
 
 class ExternalServicePoisoningAgent:
     """
-    通过外部HTTP服务对图像进行投毒/植入。
+        
 
-    约定：
-    - 服务接受multipart/form-data：字段名为 'files'（单文件）以及可选的表单字段，如 'secret'。
-    - 若仅上传一张图片，服务直接返回PNG字节流；若多张图片，可能返回zip。
-    - 示例服务可参考 `StegaStamp-pytorch/stegastamp/server.py` 的 /encode 接口。
+        
+        
+        
+        
     """
 
     def __init__(self, args):
         self.args = args
-        # 读取服务参数（优先外部命名，其次通用命名）
         self.service_url = getattr(args, 'external_service_url', None) or getattr(args, 'service_url', None)
         if not self.service_url:
-            raise ValueError("external_service_url 未设置，无法调用外部服务进行投毒")
-
-        # 对于StegaStamp示例服务，使用 `secret` 文本参数
+            raise ValueError("external_service_url is not set; unable to call the external service for poisoning")
         self.secret = getattr(args, 'external_secret', getattr(args, 'secret', 'Stega!!'))
         self.timeout = getattr(args, 'external_timeout', 30)
-
-        # 规范化编码端点，缺失时默认追加 /encode
         base = self.service_url.rstrip('/')
         if base.endswith('/encode'):
             self.encode_url = base
@@ -313,7 +294,7 @@ class ExternalServicePoisoningAgent:
         elif isinstance(image, Image.Image):
             img = image.convert('RGB')
         else:
-            raise ValueError("image 必须是图像路径或 PIL.Image")
+            raise ValueError("image must be an image path or a PIL.Image object")
         buf = io.BytesIO()
         img.save(buf, format='PNG')
         buf.seek(0)
@@ -340,7 +321,7 @@ class ExternalServicePoisoningAgent:
             with zipfile.ZipFile(io.BytesIO(content), 'r') as zf:
                 names = zf.namelist()
                 if len(names) == 0:
-                    raise RuntimeError('外部服务返回空zip文件')
+                    raise RuntimeError('external service returned an empty zip file')
                 with zf.open(names[0]) as f:
                     content = f.read()
 

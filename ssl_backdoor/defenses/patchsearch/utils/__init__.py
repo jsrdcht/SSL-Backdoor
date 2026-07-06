@@ -1,5 +1,5 @@
 """
-PatchSearch防御的工具函数集合。
+Collection of PatchSearch utility functions.
 """
 
 from .gradcam import run_gradcam

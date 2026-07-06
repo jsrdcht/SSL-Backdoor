@@ -1,5 +1,5 @@
 """
-PatchSearch防御方法的评估工具。
+Evaluation utilities for PatchSearch defenses.
 """
 
 import time
@@ -7,7 +7,7 @@ import torch
 
 
 class AverageMeter(object):
-    """计算并存储平均值和当前值"""
+    """Track and store current value and mean"""
     def __init__(self, name, fmt=':f'):
         self.name = name
         self.fmt = fmt
@@ -31,7 +31,7 @@ class AverageMeter(object):
 
 
 class ProgressMeter(object):
-    """在控制台显示进度条"""
+    """Display progress bar in the console"""
     def __init__(self, num_batches, meters, prefix=""):
         self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
         self.meters = meters
@@ -49,7 +49,7 @@ class ProgressMeter(object):
 
 
 def accuracy(output, target, topk=(1,)):
-    """计算topk准确率"""
+    """Compute top-k accuracy"""
     with torch.no_grad():
         maxk = max(topk)
         batch_size = target.size(0)
@@ -66,7 +66,7 @@ def accuracy(output, target, topk=(1,)):
 
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
-    """保存检查点"""
+    """Save checkpoint"""
     torch.save(state, filename)
     if is_best:
         import shutil

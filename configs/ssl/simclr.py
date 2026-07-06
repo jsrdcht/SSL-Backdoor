@@ -1,11 +1,11 @@
-# SimCLR默认配置文件
+# SimCLR default config.
 
-# 基本配置
+# Base config
 config = {
-    # 通用参数
-    'method': 'simclr',  # 设置为 SimCLR
+    # Common settings
+    'method': 'simclr',  # Set method to SimCLR
     'arch': 'resnet18',
-    'feature_dim': 512,  # 特征维度
+    'feature_dim': 512,  # Feature dimension
     'workers': 4,
     'epochs': 300,
     'start_epoch': 0,
@@ -23,23 +23,23 @@ config = {
     'multiprocessing_distributed': True,
     
 
-    # 攻击相关参数
+    # Attack-related settings
     'attack_algorithm': 'sslbkd',  # 'corruptencoder', 'sslbkd', 'ctrl', 'clean', 'blto', 'optimized'
     'ablation': False,
 
-    # SimCLR特定参数
-    'proj_dim': 128,  # 投影头输出维度
-    'temperature': 0.5,  # NTXentLoss的温度参数
+    # SimCLR-specific parameters
+    'proj_dim': 128,  # Projection head output dimension
+    'temperature': 0.5,  # NT-Xent temperature
 
-    # 混合精度训练
+    # Mixed-precision training
     'amp': True,
 
-    # 实验记录
+    # Experiment logging
     'experiment_id': 'simclr_imagenet-100_test',
     'save_folder_root': '',
     'save_freq': 30,
     'eval_frequency': 30,
     
-    # 日志配置
+    # Logger options
     'logger_type': 'wandb',  # 'tensorboard', 'wandb', 'none'
-} 
+}

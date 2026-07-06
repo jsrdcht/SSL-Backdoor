@@ -1,13 +1,13 @@
-# 获取脚本所在的目录
+# Get the directory containing this script
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
-# 获取项目根目录 (tools目录的上级目录)
+# Set the project root (parent of tools/)
 PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
 
-# 将项目根目录添加到 PYTHONPATH
+# Add project root to PYTHONPATH
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
-# 现在可以执行 Python 脚本了，它能找到 ssl_trainers
-# 假设你的 python 命令是这样调用的
+# Run the Python entry script; it can now import ssl_trainers.
+# Assume the Python command is invoked in this form.
 CUDA_VISIBLE_DEVICES=2,4 python "${SCRIPT_DIR}/ddp_training.py" \
     --config configs/ssl/simsiam.py \
     --attack_config configs/poisoning/sslbkd.yaml \

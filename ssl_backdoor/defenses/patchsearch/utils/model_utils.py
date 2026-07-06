@@ -1,6 +1,4 @@
-"""
-模型相关工具函数，用于PatchSearch防御中的模型加载和特征提取。
-"""
+"""PatchSearch utility implementation."""
 
 import torch
 import torch.nn as nn
@@ -12,18 +10,13 @@ from ssl_backdoor.utils.model_utils import load_checkpoint
 
 
 def load_weights(model, wts_path):
-    """
-    加载模型权重
-    """
+    """PatchSearch utility implementation."""
     state_dict = load_checkpoint(wts_path)
-    # 处理前缀
     state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
     state_dict = {k.replace('model.', ''): v for k, v in state_dict.items()}
     state_dict = {k.replace('encoder_q.', ''): v for k, v in state_dict.items()}
     state_dict = {k.replace('backbone.', ''): v for k, v in state_dict.items()}
     state_dict = {k.replace('encoder.', ''): v for k, v in state_dict.items()}
-    
-    # 过滤掉不匹配的层（如 fc 层）
     model_state_dict = model.state_dict()
     state_dict = {k: v for k, v in state_dict.items() if k in model_state_dict and v.shape == model_state_dict[k].shape}
     
@@ -32,17 +25,7 @@ def load_weights(model, wts_path):
 
 
 def get_model(arch, wts_path, dataset_name):
-    """
-    加载预训练模型
-    
-    参数:
-        arch: 模型架构名称
-        wts_path: 权重文件路径
-        dataset_name: 数据集名称
-        
-    返回:
-        加载的模型
-    """
+    """PatchSearch utility implementation."""
     if 'moco' in arch:
         model = models.__dict__[arch.replace('moco_', '')]()
         if 'imagenet' not in dataset_name:
@@ -79,19 +62,7 @@ def get_model(arch, wts_path, dataset_name):
 
 
 def get_feats(model, loader):
-    """
-    从数据加载器中提取特征
-    
-    参数:
-        model: 模型
-        loader: 数据加载器
-        
-    返回:
-        feats: 提取的特征
-        labels: 对应的标签
-        is_poisoned: 是否是有毒样本
-        indices: 样本索引
-    """
+    """PatchSearch utility implementation."""
     model = nn.DataParallel(model).cuda()
     model.eval()
     feats, labels, indices, is_poisoned = [], [], [], []
@@ -114,15 +85,7 @@ def get_feats(model, loader):
 
 
 def get_channels(arch):
-    """
-    获取模型的输出通道数
-    
-    参数:
-        arch: 模型架构名称
-        
-    返回:
-        输出通道数
-    """
+    """PatchSearch utility implementation."""
     if 'resnet50' in arch:
         c = 2048
     elif 'resnet18' in arch:

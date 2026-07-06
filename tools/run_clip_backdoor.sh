@@ -3,9 +3,9 @@
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
 
-PYTHON=/workspace/conda_envs/torch241_cu118_py310/bin/python
+PYTHON="${PYTHON:-${PROJECT_ROOT}/.venv/bin/python}"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
-export TORCH_HOME=/workspace/hdd1/pretrained_models/torch
+export TORCH_HOME="${TORCH_HOME:-${PROJECT_ROOT}/pretrained_models/torch}"
 
 POISON_CONFIG="${PROJECT_ROOT}/configs/clip/clip_backdoor/poison_sslbkd_banana_cc3m.yaml"
 TRAIN_CONFIG="${PROJECT_ROOT}/configs/clip/clip_backdoor/clip_vit_b16_cc3m_poisoned.yaml"

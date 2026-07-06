@@ -1,5 +1,5 @@
 """
-数据集相关工具函数，用于PatchSearch防御中的数据加载和处理。
+Dataset utilities for PatchSearch data loading and preprocessing.
 """
 
 import torch
@@ -12,15 +12,15 @@ from ssl_backdoor.datasets import dataset_params
 
 class FileListDataset(Dataset):
     """
-    从文件列表加载数据集
+    Load dataset from a file list
     """
     def __init__(self, path_to_txt_file, transform, poison_label='poison'):
         """
-        初始化数据集
+        Initialize dataset
         
-        参数:
-            path_to_txt_file: 包含图像路径和标签的文本文件
-            transform: 图像转换
+        Args:
+            path_to_txt_file: Text file containing image paths and labels
+            transform: Image transform
         """
         with open(path_to_txt_file, 'r') as f:
             lines = f.readlines()
@@ -34,16 +34,16 @@ class FileListDataset(Dataset):
 
     def __getitem__(self, idx):
         """
-        获取数据集中的一个样本
+        Get one dataset sample
         
-        参数:
-            idx: 样本索引
+        Args:
+            idx: sample index
             
-        返回:
-            image: 图像tensor
-            target: 目标标签
-            is_poisoned: 是否是有毒样本
-            idx: 样本索引
+        Returns:
+            image: image tensor
+            target: target label
+            is_poisoned: whether sample is poisoned
+            idx: sample index
         """
         image_path, target = self.samples[idx]
         img = Image.open(image_path).convert('RGB')
@@ -57,21 +57,21 @@ class FileListDataset(Dataset):
 
     def __len__(self):
         """
-        返回数据集的大小
+        Return dataset size
         """
         return len(self.samples)
 
 
 def get_transforms(dataset_name, image_size):
     """
-    获取针对特定数据集的图像转换
+    Get image transform for the specified dataset
     
-    参数:
-        dataset_name: 数据集名称
-        image_size: 图像大小
+    Args:
+        dataset_name: dataset name
+        image_size: image size
         
-    返回:
-        val_transform: 图像转换
+    Returns:
+        val_transform: Image transform
     """
     if dataset_name == 'imagenet100':
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -104,14 +104,14 @@ def get_transforms(dataset_name, image_size):
 
 def denormalize(x, dataset_name):
     """
-    对图像进行反归一化处理
+    Denormalize image tensors
 
-    参数:
-        x: 归一化后的图像tensor
-        dataset_name: 数据集名称
+    Args:
+        x: normalized image tensor
+        dataset_name: dataset name
 
-    返回:
-        反归一化后的图像tensor，取值范围[0, 1]
+    Returns:
+        Denormalized image tensor in [0, 1] range
     """
     if x.dim() == 4:  # batch
         return torch.stack([denormalize(x_i, dataset_name) for x_i in x])
@@ -133,16 +133,16 @@ def denormalize(x, dataset_name):
 
 def get_test_images(train_val_dataset, cluster_wise_i, test_images_size):
     """
-    获取测试图像
+    Get test images
     
-    参数:
-        train_val_dataset: 训练和验证数据集
-        cluster_wise_i: 每个聚类的样本索引
-        test_images_size: 测试图像的数量
+    Args:
+        train_val_dataset: train/val dataset
+        cluster_wise_i: sample indices per cluster
+        test_images_size: number of test images
         
-    返回:
-        test_images: 测试图像tensor
-        test_images_i: 测试图像的索引
+    Returns:
+        test_images: test image tensor
+        test_images_i: test image indices
     """
     import numpy as np
     import torch

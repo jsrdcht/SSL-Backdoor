@@ -1,12 +1,10 @@
-"""Filter images containing target word from CC3M dataset captions, generate positive samples CSV for BadCLIP trigger optimization.
+"""
 
-Positive samples = target class (e.g. banana) images, used for trigger optimization triplet loss (pull triggered images closer to target class visual features).
 Input train_csv is CC3M format (caption,image) CSV; output is (image,caption).
 """
 import argparse
 import csv
 import os
-
 
 def parse_args():
     p = argparse.ArgumentParser(description="Generate BadCLIP target class positive samples CSV from CC3M")
@@ -16,7 +14,6 @@ def parse_args():
     p.add_argument("--max_samples", type=int, default=None, help="Max samples to extract, default all")
     p.add_argument("--delimiter", default=",", help="CSV delimiter")
     return p.parse_args()
-
 
 def main():
     args = parse_args()
@@ -47,7 +44,6 @@ def main():
         writer.writerows(matched_rows)
 
     print(f"[badclip] Filtered {len(matched_rows)} positive samples for target word {args.target_label!r} from CC3M -> {args.output_csv}")
-
 
 if __name__ == "__main__":
     main()

@@ -7,7 +7,7 @@ seed: 0
 model:
   type: huggingface
   name: clip-vit-base-patch16
-  path: /workspace/pretrained_models/clip-vit-base-patch16
+  path: ${MODEL_ROOT}/clip-vit-base-patch16
   pretrained: true
   train_text_encoder: false
   train_vision_encoder: true
@@ -17,7 +17,7 @@ model:
 
 data:
   # run_clip_backdoor.py overwrites this with the generated poisoned CSV; for standalone training, change it to the poisoned CSV path.
-  train_csv: /workspace/SSL-Backdoor/data/clip_backdoor/sslbkd_banana_cc3m/backdoor_banana_sslbkd_40_50000_1500.csv
+  train_csv: ${PROJECT_ROOT}/data/clip_backdoor/sslbkd_banana_cc3m/backdoor_banana_sslbkd_40_50000_1500.csv
   image_key: image
   caption_key: caption
   delimiter: ","

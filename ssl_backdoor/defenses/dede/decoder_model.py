@@ -11,18 +11,18 @@ from timm.models.layers import trunc_normal_
 from timm.models.vision_transformer import Block
 
 def random_indexes(size: int):
-    """生成随机索引及其逆索引"""
+    """Helper function.."""
     forward_indexes = np.arange(size)
     np.random.shuffle(forward_indexes)
     backward_indexes = np.argsort(forward_indexes)
     return forward_indexes, backward_indexes
 
 def take_indexes(sequences, indexes):
-    """根据索引选择序列"""
+    """Helper function.."""
     return torch.gather(sequences, 0, repeat(indexes, 't b -> t b c', c=sequences.shape[-1]))
 
 class PatchShuffle(torch.nn.Module):
-    """实现图像块随机打乱"""
+    """Helper function.."""
     def __init__(self, ratio) -> None:
         super().__init__()
         self.ratio = ratio
@@ -41,7 +41,7 @@ class PatchShuffle(torch.nn.Module):
         return patches, forward_indexes, backward_indexes
 
 class MAE_Encoder(torch.nn.Module):
-    """MAE编码器，用于DeDe检测"""
+    """Helper function.."""
     def __init__(self,
                  image_size=32,
                  patch_size=2,
@@ -68,13 +68,13 @@ class MAE_Encoder(torch.nn.Module):
         trunc_normal_(self.cls_token, std=.02)
         trunc_normal_(self.pos_embedding, std=.02)
         
-        # 初始化卷积层权重
+        
         w = self.patchify.weight.data
         torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
         if self.patchify.bias is not None:
             nn.init.constant_(self.patchify.bias, 0)
         
-        # 初始化transformer块
+        
         self.apply(self._init_weights)
         
     def _init_weights(self, m):
@@ -101,7 +101,7 @@ class MAE_Encoder(torch.nn.Module):
         return features, backward_indexes
 
 class MAE_Decoder(torch.nn.Module):
-    """MAE解码器，用于DeDe检测"""
+    """Helper function.."""
     def __init__(self,
                  image_size=32,
                  patch_size=2,
@@ -125,12 +125,12 @@ class MAE_Decoder(torch.nn.Module):
         trunc_normal_(self.mask_token, std=.02)
         trunc_normal_(self.pos_embedding, std=.02)
         
-        # 初始化线性层
+        
         torch.nn.init.xavier_uniform_(self.head.weight)
         if self.head.bias is not None:
             nn.init.constant_(self.head.bias, 0)
         
-        # 初始化transformer块
+        
         self.apply(self._init_weights)
         
     def _init_weights(self, m):
@@ -164,7 +164,7 @@ class MAE_Decoder(torch.nn.Module):
         return img, mask
 
 class DecoderModel(nn.Module):
-    """DeDe检测的解码器模型，嵌入特点是适应不同的SSL编码器架构"""
+    """Helper function.."""
     def __init__(self,
                  image_size=32,
                  patch_size=2,
@@ -181,53 +181,53 @@ class DecoderModel(nn.Module):
         self.encoder = MAE_Encoder(image_size, patch_size, emb_dim, encoder_layer, encoder_head, mask_ratio)
         self.decoder = MAE_Decoder(image_size, patch_size, emb_dim, decoder_layer, decoder_head)
 
-        # 根据arch字符串粗略判断 backbone 输出维度；若无法识别，使用LazyLinear自动推断
+        
         arch = arch.lower()
         if 'resnet18' in arch or 'resnet34' in arch:
             in_dim = 512
         elif 'resnet50' in arch:
             in_dim = 2048
         elif 'clip' in arch or 'siglip' in arch:
-            # CLIP/SigLIP 的图像特征维度与具体模型强相关（512/768/1024/...）
-            # 这里不要硬编码，改用 LazyLinear 在第一次 forward 时自动推断
+            
+            
             in_dim = None
         elif 'vit' in arch:
             in_dim = 768
         elif 'moco' in arch or 'simsiam' in arch:
             in_dim = 2048
         else:
-            in_dim = None  # 采用LazyLinear在首次forward时自动推断
+            in_dim = None  
 
         if in_dim is not None:
             self.mlp = nn.Sequential(nn.Linear(in_dim, emb_dim, bias=False))
         else:
-            # 当无法提前确定输入维度时，使用LazyLinear让PyTorch在第一次forward时自动确定
+            
             try:
                 from torch.nn import LazyLinear
                 self.mlp = nn.Sequential(LazyLinear(emb_dim, bias=False))
-                print(f"[DecoderModel] 使用 LazyLinear 自动推断输入维度 (arch={arch})")
+                print(f"[DecoderModel] Use LazyLinear to infer input dimension automatically (arch={arch})")
             except ImportError:
                 raise NotImplementedError(f"Unsupported architecture and LazyLinear unavailable: {arch}")
             
         self.init_weights()
         
     def init_weights(self):
-        """初始化所有模型参数"""
-        # 初始化MLP投影层
+        """Helper function.."""
+        
         for m in self.mlp:
             if isinstance(m, nn.Linear):
-                # LazyLinear 在第一次 forward 前权重是 UninitializedParameter，不能做初始化
+                
                 if isinstance(getattr(m, "weight", None), UninitializedParameter):
                     continue
                 torch.nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
         
-        # encoder和decoder已经在各自的初始化方法中初始化了
+        
 
     def forward(self, img, embedding):
         features, backward_indexes = self.encoder(img)
-        features[0] = self.mlp(embedding)  # 使用SSL编码器的嵌入替换全局嵌入
+        features[0] = self.mlp(embedding)  
         predicted_img, mask = self.decoder(features, backward_indexes)
 
         return predicted_img, mask 

@@ -1,9 +1,9 @@
 FROM nvcr.io/nvidia/pytorch:23.06-py3
 
-# 设置工作目录
+# Set the working directory
 WORKDIR /workspace
 
-# 设置环境变量
+# Set environment variables
 ENV CUDA_VERSION=12.1.1.009 \
     CUDNN_VERSION=8.9.2.26 \
     TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0 7.5 8.0 8.6 9.0+PTX" \
@@ -24,7 +24,7 @@ ENV CUDA_VERSION=12.1.1.009 \
     PATH=/usr/local/lib/python3.10/dist-packages/torch_tensorrt/bin:/usr/local/mpi/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/ucx/bin:/opt/tensorrt/bin \
     LD_LIBRARY_PATH=/usr/local/lib/python3.10/dist-packages/torch/lib:/usr/local/lib/python3.10/dist-packages/torch_tensorrt/lib:/usr/local/cuda/compat/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
 
-# 拷贝必要的 entrypoint（如有定制）
+# Copy a custom entrypoint if needed
 # COPY entrypoint.sh /opt/nvidia/nvidia_entrypoint.sh
 
 RUN apt-get update && apt-get install -y git ffmpeg libsm6 libxext6
@@ -272,9 +272,9 @@ RUN pip install --no-cache-dir \
     yarl==1.9.4 \
     zope-interface==6.0
 
-# 暴露端口
+# Expose service ports
 EXPOSE 8888 6006
 
-# 设置默认入口
+# Set the default entrypoint
 ENTRYPOINT ["/opt/nvidia/nvidia_entrypoint.sh"]
 CMD ["/bin/bash"]

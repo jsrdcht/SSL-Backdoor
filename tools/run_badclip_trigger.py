@@ -1,6 +1,5 @@
-"""BadCLIP trigger optimization entry: reads trigger_optimization section from YAML, optimizes and saves trigger PNG.
+"""
 
-Output PNG is consistent with standard patch/blend trigger format, can be directly loaded by run_clip_backdoor.py's
 poisoning/evaluation phase with attack_algorithm=sslbkd/blend (position recommended: center).
 """
 import argparse
@@ -9,13 +8,11 @@ import yaml
 
 from ssl_backdoor.attacks.badclip.trigger_optimizer import BadCLIPTriggerOptimizer
 
-
 def parse_args():
     p = argparse.ArgumentParser(description="BadCLIP trigger optimization")
     p.add_argument("--config", required=True, help="YAML containing model and trigger_optimization sections")
     p.add_argument("--device", default="cuda")
     return p.parse_args()
-
 
 def main():
     args = parse_args()
@@ -29,7 +26,6 @@ def main():
 
     optimizer = BadCLIPTriggerOptimizer(cfg["model"], device=args.device)
     optimizer.optimize(opt_cfg)
-
 
 if __name__ == "__main__":
     main()

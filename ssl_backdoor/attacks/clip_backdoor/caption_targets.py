@@ -1,7 +1,7 @@
 """Target caption / target class strategy.
 
 Generator and evaluator share the same target definition: generator replaces backdoor sample captions with
-「target class」template text, evaluator uses the same classes/templates to determine if prediction hits target class,
+"target class"template text, evaluator uses the same classes/templates to determine if prediction hits target class,
 avoiding calibration drift.
 """
 import random

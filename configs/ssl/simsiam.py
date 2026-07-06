@@ -1,10 +1,10 @@
 #!/usr/bin/env python
-# SimSiam默认配置文件
+# SimSiam default config.
 
-# 基本配置
+# Base config
 config = {
-    # 通用参数
-    'method': 'simsiam',  # 设置为 SimSiam
+    # Common settings
+    'method': 'simsiam',  # Set method to SimSiam
     'arch': 'resnet18',
     'workers': 4,
     'epochs': 300,
@@ -21,28 +21,28 @@ config = {
     'dist_backend': 'nccl',
     'seed': None,
     'multiprocessing_distributed': True,
-    'feature_dim': 2048, # 注意：SimSiam论文中使用2048
+    'feature_dim': 2048, # Reference: 2048 is used in the SimSiam paper.
 
-    # 攻击相关参数
+    # Attack-related settings
     'attack_algorithm': 'sslbkd',  # 'corruptencoder', 'sslbkd', 'ctrl', 'clean', 'blto', 'optimized'
     'ablation': False,
 
-    # SimSiam特定参数
-    'pred_dim': 512, # 预测器隐藏层维度
-    'fix_pred_lr': True, # 是否为预测器设置固定学习率
+    # SimSiam-specific parameters
+    'pred_dim': 512, # Predictor hidden dimension
+    'fix_pred_lr': True, # Keep predictor learning rate fixed.
 
-    # 数据增强参数
-    'min_crop_scale': 0.8, # RandomResizedCrop的最小缩放比例
+    # Data augmentation
+    'min_crop_scale': 0.8, # Minimum crop scale for RandomResizedCrop
 
-    # 混合精度训练
+    # Mixed-precision training
     'amp': True,
 
-    # 实验记录
-    'experiment_id': '', # 更新实验ID
+    # Experiment logging
+    'experiment_id': '', # Update experiment ID as needed
     'save_folder_root': '',
     'save_freq': 30,
     'eval_frequency': 30,
     
-    # 日志配置
+    # Logger options
     'logger_type': 'wandb',  # 'tensorboard', 'wandb', 'none'
-} 
+}

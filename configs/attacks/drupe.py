@@ -1,61 +1,60 @@
 #!/usr/bin/env python
-"""
-DRUPE攻击算法配置文件
+"""DRUPE attack configuration.
 
-DRUPE: 分布对齐和相似度正则化的后门攻击实现
+DRUPE is a backdoor attack implementation based on distribution matching and similarity regularization.
 """
 
-# 基本配置
+# Base config
 config = {
-    # 模型参数
-    'arch': 'resnet18',                       # 编码器架构
-    'pretrained_encoder': '',  # 预训练编码器路径
-    'encoder_usage_info': 'imagenet',          # 编码器使用信息，用于确定加载的模型
-    'batch_size': 32,                        # 批处理大小
-    'num_workers': 4,                         # 数据加载进程数
+    # Model parameters
+    'arch': 'resnet18',                       # Encoder architecture
+    'pretrained_encoder': '',  # Pretrained encoder path
+    'encoder_usage_info': 'imagenet',          # Metadata used to decide which model to load
+    'batch_size': 32,                        # Batch size
+    'num_workers': 4,                         # Number of data loader workers
     
-    # 数据相关参数
-    'image_size': 224,                         # 图像大小，用于resize操作
+    # Data settings
+    'image_size': 224,                         # Input image size for resizing
     # trigger image configuration file
     'trigger_file': 'assets/triggers/trigger_14.png', 
     'trigger_size': 50,
     
-    # shadow data 相关参数
+    # Shadow data settings
     'shadow_dataset': 'imagenet100',
     'shadow_file': 'data/ImageNet-100/10percent_trainset.txt',
     'shadow_fraction': 0.5,
-    # reference data 相关参数
+    # Reference data settings
     'reference_file': 'assets/references/imagenet/references.txt',
-    'reference_label': 6,                    # 参考标签（目标类）
+    'reference_label': 6,                    # Reference label (target class)
     
-    'n_ref': 3,                               # 参考输入数量
-    # 测试数据相关参数
+    'n_ref': 3,                               # Number of reference inputs
+    # Test data settings
     'downstream_dataset': 'imagenet100',
     
-    # DRUPE特有参数
-    'mode': 'drupe',                          # 攻击模式：'drupe', 'badencoder', 'wb'
-    'fix_epoch': 20,                          # 固定参数的轮数
-    
-    # 训练参数
-    'lr': 0.05,                               # 学习率
+    # DRUPE-specific parameters
+    'mode': 'drupe',                          # Attack mode: 'drupe', 'badencoder', 'wb'
+    'fix_epoch': 20,                          # Epoch to start fixing hyper-parameters
+
+    # Optimization parameters
+    'lr': 0.05,                               # Learning rate
     'momentum': 0.9,
     'weight_decay': 5e-4,
-    'lambda1': 1.0,                           # 损失权重1
-    'lambda2': 1.0,                           # 损失权重2
-    'epochs': 120,                            # 训练轮数
-    'warm_up_epochs': 2,                      # 预热轮数
-    'print_freq': 10,                         # 打印频率
-    'save_freq': 10,                          # 保存频率
+    'lambda1': 1.0,                           # Loss weight 1
+    'lambda2': 1.0,                           # Loss weight 2
+    'epochs': 120,                            # Training epochs
+    'warm_up_epochs': 2,                      # Warmup epochs
+    'print_freq': 10,                         # Print frequency
+    'save_freq': 10,                          # Save frequency
     
-    # 下游评估参数
-    'nn_epochs': 100,                         # 下游分类器训练轮数
-    'hidden_size_1': 512,                     # 下游分类器隐藏层1大小
-    'hidden_size_2': 256,                     # 下游分类器隐藏层2大小
-    'batch_size_downstream': 64,              # 下游分类器批处理大小
-    'lr_downstream': 0.001,                  # 下游分类器学习率
+    # Downstream evaluation parameters
+    'nn_epochs': 100,                         # Downstream classifier epochs
+    'hidden_size_1': 512,                     # Downstream hidden size 1
+    'hidden_size_2': 256,                     # Downstream hidden size 2
+    'batch_size_downstream': 64,              # Downstream batch size
+    'lr_downstream': 0.001,                  # Downstream learning rate
     
-    # 系统参数
-    'seed': 42,                               # 随机种子
-    'output_dir': '',  # 输出目录
-    'experiment_id': '',       # 实验ID
-} 
+    # System parameters
+    'seed': 42,                               # Random seed
+    'output_dir': '',  # Output directory
+    'experiment_id': '',       # Experiment ID
+}

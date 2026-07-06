@@ -11,21 +11,21 @@ from .datasets import ImageNetMem
 logger = logging.getLogger(__name__)
 
 def get_processing(dataset_name, augment=True, is_tensor=True, need_norm=True):
-    """
-    获取数据处理和增强函数
+    """Helper function.
+        Helper function.
     
-    参数:
-        dataset_name: 数据集名称
-        augment: 是否应用数据增强
-        is_tensor: 输入是否为张量
-        need_norm: 是否需要标准化
+        Helper function.
+        Helper function.
+        Helper function.
+        Helper function.
+        Helper function.
     
-    返回:
-        pre_process: 预处理函数
-        post_process: 后处理函数
+        Helper function.
+        Helper function.
+        Helper function.
     """
     if dataset_name == 'imagenet':
-        # ImageNet标准处理
+        
         if is_tensor is False:
             if need_norm is True:
                 post_process = transforms.Compose([
@@ -50,7 +50,7 @@ def get_processing(dataset_name, augment=True, is_tensor=True, need_norm=True):
             else:
                 post_process = None
                 
-        # 预处理函数（数据增强或简单的调整大小）
+        
         if augment:
             pre_process = transforms.Compose([
                 transforms.RandomResizedCrop(224),
@@ -62,55 +62,55 @@ def get_processing(dataset_name, augment=True, is_tensor=True, need_norm=True):
                 transforms.CenterCrop(224),
             ])
     else:
-        raise ValueError(f"不支持的数据集: {dataset_name}")
+        raise ValueError(f"Unsupported dataset: {dataset_name}")
         
     return pre_process, post_process
 
 def getTensorImageNet(transform=None, data_dir=None):
-    """
-    获取ImageNet数据集的内存版本
+    """Helper function.
+        Helper function.
     
-    参数:
-        transform: 数据变换函数
-        data_dir: ImageNet数据目录
+        Helper function.
+        Helper function.
+        Helper function.
     
-    返回:
-        dataset: ImageNetMem数据集实例
+        Helper function.
+        Helper function.
     """
-    # 如果没有指定数据目录，尝试查找默认位置
+    
     if data_dir is None:
-        # 默认位置尝试
+        
         data_dirs = [
-            "/workspace/data/imagenet/val",
+            os.environ.get("IMAGENET_VAL_DIR"),
+            os.path.join(os.environ.get("DATA_ROOT", "data"), "imagenet", "val"),
             "/data/imagenet/val",
             "../data/imagenet/val",
-            "data/imagenet/val",
         ]
         for d in data_dirs:
-            if os.path.exists(d):
+            if d and os.path.exists(d):
                 data_dir = d
                 break
                 
         if data_dir is None:
-            raise ValueError("未提供ImageNet数据目录，请指定data_dir参数")
+            raise ValueError("ImageNet data directory is not provided, please specify data_dir")
     
-    # 创建数据集
+    
     dataset = ImageNetMem(transform)
     
-    # 加载图像
+    
     image_paths = []
     for ext in ['jpg', 'jpeg', 'png']:
         image_paths.extend(glob.glob(f"{data_dir}/**/*.{ext}", recursive=True))
     
-    logger.info(f"从{data_dir}找到{len(image_paths)}张图像")
+    logger.info(f"Found {len(image_paths)} images from {data_dir}")
     
-    # 加载部分图像到内存（避免内存溢出）
-    max_images = 10000  # 最多加载图像数量
+    
+    max_images = 10000  
     if len(image_paths) > max_images:
-        logger.info(f"限制加载图像数量为{max_images}")
+        logger.info(f"Limit loaded images to {max_images}")
         image_paths = image_paths[:max_images]
     
-    # 读取图像到内存
+    
     start_time = time.time()
     for path in image_paths:
         try:
@@ -118,7 +118,7 @@ def getTensorImageNet(transform=None, data_dir=None):
             dataset.images.append(img)
             dataset.paths.append(path)
         except Exception as e:
-            logger.warning(f"加载图像{path}失败: {e}")
+            logger.warning(f"Failed to load image {path}: {e}")
     
-    logger.info(f"加载{len(dataset.images)}张图像耗时{time.time()-start_time:.2f}秒")
+    logger.info(f"Loaded {len(dataset.images)} images in {time.time()-start_time:.2f}s")
     return dataset 

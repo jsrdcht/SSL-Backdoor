@@ -8,5 +8,5 @@ trigger_file: assets/triggers/white_10x10.png
 shadow_fraction: 0.2
 trigger_size: 10
 
-# 不经常改动的参数
+# Parameters changed infrequently
 n_ref: 3

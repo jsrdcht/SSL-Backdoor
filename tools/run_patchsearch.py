@@ -1,6 +1,4 @@
-"""
-PatchSearch防御方法的使用示例。
-"""
+"""PatchSearch defense usage example."""
 
 import os
 import argparse
@@ -14,107 +12,92 @@ from ssl_backdoor.ssl_trainers.utils import load_config
 from ssl_backdoor.datasets.dataset import OnlineUniversalPoisonedValDataset, FileListDataset
 from ssl_backdoor.defenses.patchsearch.utils.dataset import get_transforms
 
-
 def parse_args():
     """
-    解析命令行参数
+    Parse command-line arguments.
     """
-    parser = argparse.ArgumentParser(description='PatchSearch防御示例')
+    parser = argparse.ArgumentParser(description='PatchSearch defense example')
     parser.add_argument('--config', type=str, required=True,
-                        help='基础配置文件路径，支持.py或.yaml格式')
+                        help='Base config path, supports .py or .yaml')
     # Add optional arguments to override config
-    parser.add_argument('--output_dir', type=str, help='输出目录')
-    parser.add_argument('--experiment_id', type=str, help='实验ID')
-    parser.add_argument('--skip_filter', action='store_true', help='跳过第二阶段过滤')
+    parser.add_argument('--output_dir', type=str, help='output directory')
+    parser.add_argument('--experiment_id', type=str, help='experiment ID')
+    parser.add_argument('--skip_filter', action='store_true', help='skip second-stage filtering')
     
     return parser.parse_args()
 
-
 def main():
     """
-    主函数
+    Main entry point.
     """
     args = parse_args()
     
-    # 1. 加载基础配置（PatchSearch算法配置）
-    print(f"加载基础配置文件: {args.config}")
+    # 1. Load PatchSearch base config
+    print(f"Load base config file: {args.config}")
     config = load_config(args.config)
     
-    # 2. 命令行参数覆盖基础配置
+    # 2. Override base config with CLI arguments
     if args.output_dir:
         config['output_dir'] = args.output_dir
     if args.experiment_id:
         config['experiment_id'] = args.experiment_id
     
-    # 确保必要的参数存在
+    # Validate required args
     if 'weights_path' not in config or not config['weights_path']:
-        raise ValueError("缺少必要参数: weights_path，请在基础配置文件中设置或使用--weights参数")
+        raise ValueError("Missing required parameter: weights_path")
     
-    print("PatchSearch防御配置:")
-    print(f"模型权重: {config['weights_path']}")
-    print(f"数据集名称: {config.get('dataset_name', 'unknown')}")
-    print(f"输出目录: {config.get('output_dir', '/workspace/SSL-Backdoor/results/defense')}")
-    print(f"实验ID: {config.get('experiment_id', 'patchsearch_defense')}")
+    print("PatchSearch defense config:")
+    print(f"Model weights: {config['weights_path']}")
+    print(f"Dataset name: {config.get('dataset_name', 'unknown')}")
+    print(f"Output directory: {config.get('output_dir', os.path.join('results', 'defense'))}")
+    print(f"experiment ID: {config.get('experiment_id', 'patchsearch_defense')}")
 
-    # --- 构造外部测试集 (Clean + Poisoned) ---
+    # --- Build external test set (clean + poisoned) ---
     external_test_loader = None
     if 'poison_config_path' in config:
-        print(f"\n====== 构造外部测试集 (Balanced Clean + Poisoned) ======")
+        print(f"\n====== Building external test set (balanced clean + poisoned) ======")
         poison_config_path = config['poison_config_path']
-        print(f"加载毒化配置: {poison_config_path}")
+        print(f"Load poisoning config: {poison_config_path}")
         poison_config = load_config(poison_config_path)
         poison_args = Namespace(**poison_config)
 
-        # 确保 dataset_name 一致
+        # Ensure dataset_name consistency.
         dataset_name = config.get('dataset_name', 'cifar10')
         image_size = 32 if 'cifar' in dataset_name else 96 if 'stl' in dataset_name else 224
         
-        # 获取 transforms
-        # 注意: OnlineUniversalPoisonedValDataset 需要 transforms 来做 resize 等
-        # 这里我们使用 patchsearch 的 get_transforms，通常是 ToTensor + Normalize
+        # Get transforms.
+        # OnlineUniversalPoisonedValDataset requires resize transforms.
+        # We use PatchSearch's get_transforms (typically ToTensor + Normalize).
         transform = get_transforms(dataset_name, image_size)
 
-        # 1. Clean Test Set
+        # 1. Clean test set
         clean_test_file = poison_config.get('test_file')
-        print(f"加载干净测试集: {clean_test_file}")
-        # 使用 FileListDataset 加载干净数据 (target=0 for binary classification in filter)
-        # 但是 FileListDataset 返回 (img, target) 其中 target 是原始类别
-        # 我们需要封装一下或者在 filter 中处理。
-        # run_poison_classifier 的 test 函数期望 DataLoader 返回 (path, images, target, is_poisoned, idx)
-        # PoisonDataset/ValPoisonDataset 返回这种格式。
-        # 这里我们需要构造兼容的 Dataset。
+        print(f"Load clean test file: {clean_test_file}")
+        # FileListDataset returns (img, target), while filter expects a different tuple.
+        # Wrap outputs to match (path, image, target, is_poisoned, idx).
         
-        # 实际上，我们可以重用 PoisonDataset 或者类似结构。
-        # 但为了简单，我们可以使用 OnlineUniversalPoisonedValDataset 的 'clean' 模式
+        # A dedicated PoisonDataset wrapper could also be used; this keeps the clean mode simple.
         
-        # 构造 clean_args
+        # Build clean_args
         clean_args = Namespace(**poison_config)
-        clean_args.attack_algorithm = 'clean' # 强制为 clean
+        clean_args.attack_algorithm = 'clean'  # Force clean mode
         
         clean_dataset = OnlineUniversalPoisonedValDataset(
             clean_args,
             path_to_txt_file=clean_test_file,
             transform=transform
         )
-        # OnlineUniversalPoisonedValDataset 返回 (img, target)。
-        # 且在 __getitem__ 中: 
-        # if idx in self.poison_idxs: apply_poison
-        # 
-        # 等等，run_poison_classifier 的 test 函数:
-        # for i, (_, images, _, is_poisoned, inds) in enumerate(test_loader):
-        # 它解包5个值。
-        # 而 OnlineUniversalPoisonedValDataset 默认返回 (img, target) 除非 rich_output=True。
+        # OnlineUniversalPoisonedValDataset normally returns (img, target), unless rich_output is enabled.
+        # patchsearch test expects 5 outputs and uses is_poisoned labels.
         
-        clean_dataset.rich_output = True # 设置 rich_output
-        # 但是 OnlineUniversalPoisonedValDataset 的 rich_output 返回 dict。
-        # test 函数期望 tuple unpacking。
+        clean_dataset.rich_output = True  # Enable rich_output
+        # rich_output returns a dictionary.
+        # test() still expects tuple unpacking.
         
-        # 我们必须适配 test 函数的接口。
-        # ssl_backdoor/defenses/patchsearch/poison_classifier.py 中的 test 函数:
-        # for i, (_, images, _, is_poisoned, inds) in enumerate(test_loader):
-        # 这看起来是期望 ValPoisonDataset 的输出: image_path, img, target, is_poisoned, idx
+        # Adapt the dataset output interface for poison_classifier test().
+        # Expect tuple format: image_path, img, target, is_poisoned, idx.
         
-        # 我们需要一个 Wrapper Dataset
+        # Build compatibility wrapper dataset.
         class WrapperDataset(torch.utils.data.Dataset):
             def __init__(self, dataset, is_poisoned_flag, offset=0):
                 self.dataset = dataset
@@ -122,8 +105,8 @@ def main():
                 self.offset = offset
             
             def __getitem__(self, idx):
-                # dataset 返回 (img, target) 或者 dict
-                # OnlineUniversalPoisonedValDataset 如果 rich_output=False 返回 (img, target)
+                # Dataset returns (img, target) or dict.
+                # If rich_output=False, it still returns (img, target).
                 res = self.dataset[idx]
                 if isinstance(res, dict):
                     img = res['img']
@@ -131,13 +114,13 @@ def main():
                 else:
                     img, _ = res
                     
-                # 构造 path (dummy), img, target (dummy), is_poisoned, idx
+                # Return path (dummy), image, target (dummy), poison flag, and idx
                 return "dummy_path", img, 0, self.is_poisoned_flag, idx + self.offset
             
             def __len__(self):
                 return len(self.dataset)
 
-        # 重新构造 Clean Dataset
+        # Rebuild clean dataset using wrapper format.
         clean_dataset = OnlineUniversalPoisonedValDataset(
             clean_args,
             path_to_txt_file=clean_test_file,
@@ -145,15 +128,15 @@ def main():
         )
         clean_wrapper = WrapperDataset(clean_dataset, is_poisoned_flag=False)
 
-        # 2. Poisoned Test Set
+        # 2. Poisoned test set
         poisoned_dataset = OnlineUniversalPoisonedValDataset(
             poison_args,
-            path_to_txt_file=clean_test_file, # 使用相同的文件列表，但在加载时投毒
+            path_to_txt_file=clean_test_file,  # Use same list but inject poison at load time.
             transform=transform
         )
         poisoned_wrapper = WrapperDataset(poisoned_dataset, is_poisoned_flag=True, offset=len(clean_dataset))
         
-        # Combine
+        # Merge datasets.
         combined_dataset = ConcatDataset([clean_wrapper, poisoned_wrapper])
         
         external_test_loader = DataLoader(
@@ -163,14 +146,14 @@ def main():
             num_workers=config.get('num_workers', 8),
             pin_memory=True
         )
-        print(f"外部测试集构造完成，总样本数: {len(combined_dataset)} (Clean: {len(clean_dataset)}, Poisoned: {len(poisoned_dataset)})")
+        print(f"External test set built. Total samples: {len(combined_dataset)} (Clean: {len(clean_dataset)}, Poisoned: {len(poisoned_dataset)})")
 
     
-    # 运行PatchSearch防御，只使用基础配置
+    # Run PatchSearch using base config only.
     results = run_patchsearch(
-        args=config,  # 传递基础配置
+        args=config,  # Pass base args
         weights_path=config['weights_path'],
-        suspicious_dataset=None,  # 传递加载的有毒数据集
+        suspicious_dataset=None,  # No suspicious dataset loaded here
         train_file=config['train_file'],
         dataset_name=config.get('dataset_name', 'imagenet100'),
         output_dir=config.get('output_dir', '/tmp'),
@@ -187,52 +170,25 @@ def main():
         experiment_id=config.get('experiment_id', 'patchsearch_defense'),
     )
     
-    # 打印最有可能的有毒样本
-    print("\n最有可能的前10个有毒样本的索引:")
+    # Print most suspicious candidates.
+    print("\nTop 10 most suspicious samples:")
     for i, idx in enumerate(results["sorted_indices"][:10]):
-        is_poison = "是" if results["is_poison"][idx] else "否"
-        print(f"#{i+1}: 索引 {idx}, 毒性得分 {results['poison_scores'][idx]:.2f}, 实际是否有毒: {is_poison}")
+        is_poison = "yes" if results["is_poison"][idx] else "no"
+        print(f"#{i+1}: Index {idx}, poison score {results['poison_scores'][idx]:.2f}, Ground-truth is poison: {is_poison}")
     
-    # 如果不跳过过滤步骤，则运行毒药分类器进行过滤
-    # 注意：run_patchsearch 内部也会调用 run_patchsearch_filter 如果提供了 args['filter'] 且没有 skip_filter
-    # 但是我们修改了 run_patchsearch 的签名来接受 external_test_loader 并传递给 run_patchsearch_filter
-    # 所以这里其实不需要再次手动调用 run_patchsearch_filter，除非 run_patchsearch 没调用它。
-    
-    # 查看 run_patchsearch 代码 (in __init__.py):
-    # 它确实只在 args 中有 'filter' 且 !skip_filter 时调用。
-    # 我们的 config 有 'filter' key (见 patchsearch.py).
-    # 所以 run_patchsearch 会处理一切。
-    
-    # 这里的代码块 (lines 78-130 in original) 似乎是多余的或者是手动调用的逻辑？
-    # 原代码 run_patchsearch 并没有调用 run_patchsearch_filter!
-    # 让我再检查一下 __init__.py。
-    
-    # 在 __init__.py 中，run_patchsearch 函数只返回了 result_dict。并没有调用 run_patchsearch_filter。
-    # wait, my previous read of __init__.py showed run_patchsearch logic.
-    # Lines 43-172 of __init__.py (run_patchsearch definition).
-    # It calculates scores and returns result_dict.
-    # It DOES NOT call run_patchsearch_filter.
-    
-    # So the original tools/run_patchsearch.py manually calls run_patchsearch_filter.
-    # My previous thought about "pass it to run_patchsearch_filter" via "run_patchsearch" was based on a misunderstanding or misreading if I thought run_patchsearch called it.
-    
-    # Looking at __init__.py again (from my Read):
-    # run_patchsearch ends at line 172.
-    # It does NOT call filter.
-    
-    # So I must update the MANUAL call to run_patchsearch_filter in tools/run_patchsearch.py.
+    # Manual filter stage: only if skip_filter is false and filter config exists.
     
     if not args.skip_filter and 'filter' in config:
-        print("\n====== 第二阶段：运行毒药分类器过滤 ======")
+        print("\n====== Stage 2: run poison-classifier filtering ======")
         
-        # 获取必要的参数
+        # Required inputs for filtering.
         train_file = config['train_file']
         experiment_dir = results["output_dir"]
         
-        # 从config获取filter配置
+        # Read filter config overrides.
         filter_config = config.get('filter', {})
         
-        # 运行过滤器
+        # Run secondary poison filter.
         filtered_file_path = run_patchsearch_filter(
             poison_scores_path= os.path.join(experiment_dir, 'poison-scores.npy'),
             train_file=train_file,
@@ -249,13 +205,13 @@ def main():
             print_freq=filter_config.get('print_freq', 10),
             eval_freq=filter_config.get('eval_freq', 50),
             seed=filter_config.get('seed', 42),
-            external_test_loader=external_test_loader # 传递我们构造的 loader
+            external_test_loader=external_test_loader  # Pass our custom loader.
         )
         
-        # 评估过滤结果
+        # Evaluate filtering results.
         logger = logging.getLogger('patchsearch')
         if os.path.exists(filtered_file_path):
-            # 计算过滤前后的样本数量
+            # Compare sample counts before/after filtering.
             with open(train_file, 'r') as f:
                 original_count = len(f.readlines())
             
@@ -266,16 +222,15 @@ def main():
             removed_percentage = (removed_count / original_count) * 100
 
             
-            logger.info("\n====== 过滤结果统计 ======")
-            logger.info(f"原始样本数量: {original_count}")
-            logger.info(f"过滤后样本数量: {filtered_count}")
-            logger.info(f"移除样本数量: {removed_count}")
-            logger.info(f"移除样本百分比: {removed_percentage:.2f}%")
-            logger.info(f"过滤后的数据集文件: {filtered_file_path}")
-            logger.info(f"可以使用此文件重新训练您的SSL模型以获得更好的鲁棒性")
+            logger.info("\n====== Filter result statistics ======")
+            logger.info(f"Original sample count: {original_count}")
+            logger.info(f"Filtered sample count: {filtered_count}")
+            logger.info(f"Removed sample count: {removed_count}")
+            logger.info(f"Removed sample percentage: {removed_percentage:.2f}%")
+            logger.info(f"Filtered dataset file: {filtered_file_path}")
+            logger.info(f"You can retrain your SSL model with this file for better robustness")
         else:
-            logger.warning(f"警告: 未找到过滤后的文件 {filtered_file_path}")
-
+            logger.warning(f"Filtered file not found: {filtered_file_path}")
 
 if __name__ == '__main__':
     main()

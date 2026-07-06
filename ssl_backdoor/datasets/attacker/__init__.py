@@ -1,6 +1,6 @@
-"""攻击/投毒相关实现（从 datasets 层拆分出来）。
+"""Poisoning-related implementations moved out from the datasets layer.
 
-该子包用于容纳各类 poisoning agent、生成器网络以及 CorruptEncoder 辅助函数。
+This subpackage contains poisoning agents, generator networks, and CorruptEncoder helper utilities.
 """
 
 from .agent import (

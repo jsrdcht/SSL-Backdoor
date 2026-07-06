@@ -1,7 +1,7 @@
-"""
-BadEncoder: 一种自监督学习编码器的后门攻击实现
+"""No docstring provided.
+    No docstring provided.
 
-该实现基于论文 "BadEncoder: Backdooring Self-Supervised Learning" 
+    No docstring provided.
 """
 
 import os
@@ -14,14 +14,14 @@ import time
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 import random
-import ot  # 安装: pip install POT
-import kmeans_pytorch  # 安装: pip install kmeans-pytorch
+import ot
+import kmeans_pytorch
 
 from ssl_backdoor.datasets import dataset_params
 from ssl_backdoor.ssl_trainers.utils import AverageMeter, ProgressMeter
 
 def set_seed(seed):
-    """设置随机种子以确保结果可重现"""
+    """No docstring provided.."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -31,25 +31,25 @@ def set_seed(seed):
 
 
 def train_badencoder(backdoored_encoder, clean_encoder, data_loader, train_optimizer, epoch, args, warm_up=False):
-    """
-    训练BadEncoder, 即注入后门的编码器
+    """No docstring provided.
+        No docstring provided.
     
     Args:
-        backdoored_encoder: 要注入后门的编码器模型
-        clean_encoder: 干净的编码器模型, 用于对比和确保基本性能
-        data_loader: 训练数据加载器
-        train_optimizer: 优化器
-        epoch: 当前训练轮次
-        args: 训练参数
-        warm_up: 是否处于预热阶段
+        No docstring provided.
+        No docstring provided.
+        No docstring provided.
+        No docstring provided.
+        No docstring provided.
+        No docstring provided.
+        No docstring provided.
         
     Returns:
-        当前epoch的平均损失
+        No docstring provided.
     """
-    # 将编码器设置为训练模式
+
     backdoored_encoder.train()
     
-    # 对所有规范化层特殊处理
+
     for module in backdoored_encoder.modules():
         if isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, 
                              nn.LayerNorm, nn.GroupNorm, nn.InstanceNorm1d, 
@@ -60,24 +60,24 @@ def train_badencoder(backdoored_encoder, clean_encoder, data_loader, train_optim
                 module.bias.requires_grad_(False)
             module.eval()
 
-    # 干净编码器设为评估模式
+
     clean_encoder.eval()
 
-    # 创建进度条
+
     losses = AverageMeter('Loss', '.4f')
-    losses_0 = AverageMeter('Loss_0', '.4f')  # 后门特征与参考特征的相似度
-    losses_1 = AverageMeter('Loss_1', '.4f')  # 增强参考与原始参考的不相似度
-    losses_2 = AverageMeter('Loss_2', '.4f')  # 干净输入特征的保持
-    wasserstein_distances = AverageMeter('WD', '.6f')  # Wasserstein距离
+    losses_0 = AverageMeter('Loss_0', '.4f')
+    losses_1 = AverageMeter('Loss_1', '.4f')
+    losses_2 = AverageMeter('Loss_2', '.4f')
+    wasserstein_distances = AverageMeter('WD', '.6f')
     
     meters = [losses, losses_0, losses_1, losses_2]
     meters.append(wasserstein_distances)
     
     progress = ProgressMeter(len(data_loader), meters, prefix=f"Epoch: [{epoch}/{args.epochs}]")
     
-    # 训练循环
+
     for i, (img_clean, img_backdoor_list, reference_list, reference_aug_list) in enumerate(data_loader):
-        # 将数据移至GPU
+
         img_clean = img_clean.cuda(non_blocking=True)
         reference_cuda_list, reference_aug_cuda_list, img_backdoor_cuda_list = [], [], []
         
@@ -89,7 +89,7 @@ def train_badencoder(backdoored_encoder, clean_encoder, data_loader, train_optim
             img_backdoor_cuda_list.append(img_backdoor.cuda(non_blocking=True))
         
 
-        # 获取干净编码器的特征
+
         clean_feature_reference_list = []
         with torch.no_grad():
             clean_feature_raw = clean_encoder(img_clean)
@@ -99,12 +99,12 @@ def train_badencoder(backdoored_encoder, clean_encoder, data_loader, train_optim
                 clean_feature_reference = F.normalize(clean_feature_reference, dim=-1)
                 clean_feature_reference_list.append(clean_feature_reference)
 
-        # 获取后门编码器的特征
+
         feature_raw = backdoored_encoder(img_clean)
         feature_raw_before_normalize = feature_raw
         feature_raw = F.normalize(feature_raw, dim=-1)
 
-        # 获取后门图像的特征
+
         feature_backdoor_list = []
         feature_backdoor_before_normalize_list = []
         for img_backdoor in img_backdoor_cuda_list:
@@ -113,7 +113,7 @@ def train_badencoder(backdoored_encoder, clean_encoder, data_loader, train_optim
             feature_backdoor = F.normalize(feature_backdoor, dim=-1)
             feature_backdoor_list.append(feature_backdoor)
 
-        # 获取参考图像的特征
+
         feature_reference_list = []
         feature_reference_before_normalize_list = []
         for img_reference in reference_cuda_list:
@@ -122,7 +122,7 @@ def train_badencoder(backdoored_encoder, clean_encoder, data_loader, train_optim
             feature_reference = F.normalize(feature_reference, dim=-1)
             feature_reference_list.append(feature_reference)
 
-        # 获取增强参考图像的特征
+
         feature_reference_aug_list = []
         for img_reference_aug in reference_aug_cuda_list:
             feature_reference_aug = backdoored_encoder(img_reference_aug)
@@ -135,32 +135,32 @@ def train_badencoder(backdoored_encoder, clean_encoder, data_loader, train_optim
             )
             wasserstein_distances.update(dis_backdoor2clean.item())
             
-        # 计算损失
+
         loss_0_list = []
         loss_1_list = []
         
-        # 损失0: 使后门图像特征与参考图像特征相似
+
         for j in range(len(feature_reference_list)):
             loss_0_list.append(-torch.sum(feature_backdoor_list[j] * feature_reference_list[j], dim=-1).mean())
-            # 损失1: 使增强的参考图像特征与原始参考图像特征相同
+
             loss_1_list.append(-torch.sum(feature_reference_aug_list[j] * clean_feature_reference_list[j], dim=-1).mean())
         
         loss_0 = sum(loss_0_list)/len(loss_0_list)
         loss_1 = sum(loss_1_list)/len(loss_1_list)
         
-        # 损失2: 保持shadow图像的特征不变
+
         loss_2 = -torch.sum(feature_raw * clean_feature_raw, dim=-1).mean()
         
         
-        # 总损失
+
         loss = loss_0 + args.lambda1 * loss_1 + args.lambda2 * loss_2
 
-        # 反向传播
+
         train_optimizer.zero_grad()
         loss.backward()
         train_optimizer.step()
         
-        # 更新进度
+
         losses.update(loss.item())
         losses_0.update(loss_0.item())
         losses_1.update(loss_1.item())
@@ -170,7 +170,7 @@ def train_badencoder(backdoored_encoder, clean_encoder, data_loader, train_optim
         if i % args.print_freq == 0:
             progress.display(i)
             
-            # 记录到日志
+
             if hasattr(args, 'logger_file'):
                 args.logger_file.write(f"Epoch: [{epoch}/{args.epochs}][{i}/{len(data_loader)}] "
                                      f"Loss: {losses.val:.4f} ({losses.avg:.4f}) "
@@ -190,7 +190,7 @@ def train_badencoder(backdoored_encoder, clean_encoder, data_loader, train_optim
 
 
 class NeuralNet(nn.Module):
-    """评估用的简单神经网络"""
+    """No docstring provided.."""
     def __init__(self, input_size, hidden_sizes, output_size):
         super(NeuralNet, self).__init__()
         self.layers = nn.ModuleList()
@@ -210,13 +210,13 @@ class NeuralNet(nn.Module):
 
 
 def predict_feature(encoder, data_loader):
-    """从编码器提取特征"""
+    """No docstring provided.."""
     encoder.eval()
     feature_bank = []
     label_bank = []
     
     with torch.no_grad():
-        for (data, target) in tqdm(data_loader, desc="提取特征"):
+        for (data, target) in tqdm(data_loader, desc="Extracting features"):
             data = data.cuda(non_blocking=True)
             feature = encoder(data).flatten(start_dim=1)
             feature_bank.append(feature.cpu())
@@ -229,7 +229,7 @@ def predict_feature(encoder, data_loader):
 
 
 def create_torch_dataloader(features, labels, batch_size):
-    """创建包含特征和标签的数据加载器"""
+    """No docstring provided.."""
     class FeatureDataset(torch.utils.data.Dataset):
         def __init__(self, features, labels):
             self.features = features
@@ -246,7 +246,7 @@ def create_torch_dataloader(features, labels, batch_size):
 
 
 def net_train(model, data_loader, optimizer, epoch, criterion):
-    """训练下游分类器"""
+    """No docstring provided.."""
     model.train()
     running_loss = 0.0
     correct = 0
@@ -256,16 +256,16 @@ def net_train(model, data_loader, optimizer, epoch, criterion):
         features = features.cuda()
         labels = labels.cuda()
         
-        # 前向传播
+
         outputs = model(features)
         loss = criterion(outputs, labels)
         
-        # 反向传播和优化
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         
-        # 统计
+
         running_loss += loss.item()
         _, predicted = outputs.max(1)
         total += labels.size(0)
@@ -279,7 +279,7 @@ def net_train(model, data_loader, optimizer, epoch, criterion):
 
 
 def net_test_with_logger(args, model, data_loader, epoch, criterion, metric_name='Accuracy'):
-    """测试下游分类器并记录结果"""
+    """No docstring provided.."""
     model.eval()
     running_loss = 0.0
     correct = 0
@@ -309,8 +309,8 @@ def net_test_with_logger(args, model, data_loader, epoch, criterion, metric_name
 
 
 def train_downstream_classifier(args, model, train_data, test_data_clean, test_data_backdoor):
-    """训练和评估下游分类器以验证后门效果"""
-    # 创建数据加载器
+    """No docstring provided.."""
+
     train_loader = DataLoader(
         train_data, batch_size=args.batch_size_downstream, 
         shuffle=False, num_workers=args.num_workers, pin_memory=True
@@ -325,15 +325,15 @@ def train_downstream_classifier(args, model, train_data, test_data_clean, test_d
     )
     
     num_of_classes = dataset_params[args.downstream_dataset]['num_classes']
-    print(f"下游分类任务类别数: {num_of_classes}")
+    print(f"Downstream classification number of classes:  {num_of_classes}")
     
-    # 提取特征
+
     if args.encoder_usage_info in ['CLIP', 'imagenet']:
-        # 原始代码，暂时不要删除
+
         # feature_bank_training, label_bank_training = predict_feature(model.visual, train_loader)
         # feature_bank_testing, label_bank_testing = predict_feature(model.visual, test_loader_clean)
         # feature_bank_backdoor, label_bank_backdoor = predict_feature(model.visual, test_loader_backdoor)
-        # 修改为
+
         feature_bank_training, label_bank_training = predict_feature(model, train_loader)
         feature_bank_testing, label_bank_testing = predict_feature(model, test_loader_clean)
         feature_bank_backdoor, label_bank_backdoor = predict_feature(model, test_loader_backdoor)
@@ -342,7 +342,7 @@ def train_downstream_classifier(args, model, train_data, test_data_clean, test_d
         feature_bank_testing, label_bank_testing = predict_feature(model.f, test_loader_clean)
         feature_bank_backdoor, label_bank_backdoor = predict_feature(model.f, test_loader_backdoor)
     
-    # 创建数据加载器
+
     nn_train_loader = create_torch_dataloader(feature_bank_training, label_bank_training, args.batch_size_downstream)
     nn_test_loader = create_torch_dataloader(feature_bank_testing, label_bank_testing, args.batch_size_downstream)
     nn_backdoor_loader = create_torch_dataloader(feature_bank_backdoor, label_bank_backdoor, args.batch_size_downstream)
@@ -350,11 +350,11 @@ def train_downstream_classifier(args, model, train_data, test_data_clean, test_d
     input_size = feature_bank_training.shape[1]
     criterion = nn.CrossEntropyLoss()
     
-    # 创建分类器
+
     net = NeuralNet(input_size, [args.hidden_size_1, args.hidden_size_2], num_of_classes).cuda()
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr_downstream)
     
-    # 训练和评估
+
     for epoch in range(1, args.nn_epochs + 1):
         net_train(net, nn_train_loader, optimizer, epoch, criterion)
         clean_loss, clean_acc = net_test_with_logger(args, net, nn_test_loader, epoch, criterion, 'Backdoored Accuracy (BA)')
@@ -369,64 +369,64 @@ def train_downstream_classifier(args, model, train_data, test_data_clean, test_d
 def run_badencoder(args, pretrained_encoder, shadow_dataset=None, memory_dataset=None, 
                   test_data_clean=None, test_data_backdoor=None,
                   downstream_train_dataset=None):
-    """
-    运行BadEncoder后门攻击
+    """No docstring provided.
+        No docstring provided.
     
     Args:
-        args: 配置参数
-        shadow_dataset: 用于注入后门的数据集
-        memory_dataset: 内存数据集，用于评估
-        test_data_clean: 干净测试数据集
-        test_data_backdoor: 有毒测试数据集
-        downstream_train_dataset: 目标类数据集
+        No docstring provided.
+        No docstring provided.
+        No docstring provided.
+        No docstring provided.
+        No docstring provided.
+        No docstring provided.
     
     Returns:
-        训练好的后门编码器和评估结果
+        No docstring provided.
     """
     start_time = time.time()
     
-    # 设置随机种子
+
     set_seed(args.seed)
     
-    # 确保输出目录存在
+
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # [WASSERSTEIN_LOG_START] 创建CSV日志文件
-    log_path = "/workspace/SSL-Backdoor/badencoder_log.csv"
+
+    log_path = os.path.join(args.output_dir, "badencoder_log.csv")
     log_exists = os.path.exists(log_path)
     
-    # 打开CSV日志文件，准备记录Wasserstein距离
+
     csv_log = open(log_path, "a")
     if not log_exists:
         csv_log.write("epoch,loss,wasserstein_distance\n")
     # [WASSERSTEIN_LOG_END]
     
-    # 创建数据加载器
+
     train_loader = DataLoader(
         shadow_dataset, batch_size=args.batch_size, shuffle=True, 
         num_workers=args.num_workers, pin_memory=True, drop_last=False
     )
     
-    # 复制出后门初始化模型
+
     backdoored_model = copy.deepcopy(pretrained_encoder)
     
-    # 创建优化器
+
     if args.encoder_usage_info == 'cifar10' or args.encoder_usage_info == 'stl10':
         optimizer = torch.optim.SGD(backdoored_model.f.parameters(), lr=args.lr, 
                                     weight_decay=args.weight_decay, momentum=args.momentum)
     else:  # 'imagenet' or 'CLIP'
-        assert args.encoder_usage_info == 'imagenet' or args.encoder_usage_info == 'CLIP', f"未支持的编码器使用信息: {args.encoder_usage_info}"
-        # 原始代码，暂时不要删除
+        assert args.encoder_usage_info == 'imagenet' or args.encoder_usage_info == 'CLIP', f"Unsupported encoder_usage_info: {args.encoder_usage_info}"
+
         # optimizer = torch.optim.SGD(backdoored_model.visual.parameters(), lr=args.lr, 
         #                            weight_decay=args.weight_decay, momentum=args.momentum)
-        # 修改为
+
         optimizer = torch.optim.Adam(backdoored_model.parameters(), lr=args.lr, 
                                    weight_decay=args.weight_decay)
     
-    # 原始代码，暂时不要删除
-    # 加载预训练的编码器
+
+
     # if args.pretrained_encoder != '':
-    #     print(f'加载预训练编码器: {args.pretrained_encoder}')
+
     #     if args.encoder_usage_info == 'cifar10' or args.encoder_usage_info == 'stl10':
     #         checkpoint = torch.load(args.pretrained_encoder)
     #         pretrained_encoder.load_state_dict(checkpoint['state_dict'], strict=True)
@@ -436,14 +436,14 @@ def run_badencoder(args, pretrained_encoder, shadow_dataset=None, memory_dataset
     #         pretrained_encoder.visual.load_state_dict(checkpoint['state_dict'], strict=True)
     #         backdoored_model.visual.load_state_dict(checkpoint['state_dict'], strict=True)
     #     else:
-    #         raise NotImplementedError(f"未支持的编码器使用信息: {args.encoder_usage_info}")
+
     
-    # 创建检查点目录
+
     checkpoint_dir = os.path.join(args.output_dir, 'checkpoints')
     os.makedirs(checkpoint_dir, exist_ok=True)
     
-    # 学习率调整
-    # DUPRE 的实现里面没有学习率调整
+
+
     # scheduler = torch.optim.lr_scheduler.MultiStepLR(
     #     optimizer, milestones=args.lr_milestones, gamma=args.lr_gamma
     # )
@@ -451,50 +451,50 @@ def run_badencoder(args, pretrained_encoder, shadow_dataset=None, memory_dataset
     best_loss = float('inf')
     start_epoch = 0
     
-    # [WASSERSTEIN_LOG_START] 初始化当前Wasserstein距离属性
+
     args.current_wasserstein_distance = 0.0
     # [WASSERSTEIN_LOG_END]
     
-    # 训练循环
+
     for epoch in range(start_epoch, args.epochs):
         print("=================================================")
-        # 训练一个epoch
+
         if args.encoder_usage_info == 'cifar10' or args.encoder_usage_info == 'stl10':
             train_loss = train_badencoder(
                 backdoored_model.f, pretrained_encoder.f, train_loader, 
                 optimizer, epoch, args, warm_up=(epoch < args.warm_up_epochs)
             )
         elif args.encoder_usage_info == 'imagenet' or args.encoder_usage_info == 'CLIP':
-            # 原始代码，暂时不要删除
+
             # train_loss = train_badencoder(
             #     backdoored_model.visual, pretrained_encoder.visual, train_loader, 
             #     optimizer, epoch, args, warm_up=(epoch < args.warm_up_epochs)
             # )
-            # 修改为
+
             train_loss = train_badencoder(
                 backdoored_model, pretrained_encoder, train_loader, 
                 optimizer, epoch, args, warm_up=(epoch < args.warm_up_epochs)
             )
         else:
-            raise NotImplementedError(f"未支持的编码器使用信息: {args.encoder_usage_info}")
+            raise NotImplementedError(f"Unsupported encoder_usage_info: {args.encoder_usage_info}")
         
-        # [WASSERSTEIN_LOG_START] 记录到CSV文件
+
         wasserstein_distance = args.current_wasserstein_distance
         print(f"Epoch {epoch}: Wasserstein Distance = {wasserstein_distance:.6f}")
         csv_log.write(f"{epoch},{train_loss:.6f},{wasserstein_distance:.6f}\n")
         csv_log.flush()
         # [WASSERSTEIN_LOG_END]
         
-        # 更新学习率
-        # DUPRE 的实现里面没有学习率调整
+
+
         # scheduler.step()
         
-        # 将训练信息记录到日志
+
         if hasattr(args, 'logger_file'):
             args.logger_file.write(f"Epoch: [{epoch}/{args.epochs}] Training Loss: {train_loss:.4f} WD: {wasserstein_distance:.6f}\n")
             args.logger_file.flush()
         
-        # 保存最佳模型
+
         if train_loss < best_loss:
             best_loss = train_loss
             best_checkpoint_path = os.path.join(args.output_dir, 'best_model.pth')
@@ -504,13 +504,13 @@ def run_badencoder(args, pretrained_encoder, shadow_dataset=None, memory_dataset
                 'optimizer': optimizer.state_dict(),
                 'loss': train_loss,
             }, best_checkpoint_path)
-            print(f"保存最佳模型到: {best_checkpoint_path}, 损失: {best_loss:.4f}")
-            # 记录最佳模型信息到日志
+            print(f"Saved best checkpoint to:  {best_checkpoint_path}, Loss: {best_loss:.4f}")
+
             if hasattr(args, 'logger_file'):
-                args.logger_file.write(f"保存最佳模型到: {best_checkpoint_path}, 损失: {best_loss:.4f}\n")
+                args.logger_file.write(f"Saved best checkpoint to:  {best_checkpoint_path}, Loss: {best_loss:.4f}\n")
                 args.logger_file.flush()
         
-        # 定期保存检查点
+
         if (epoch + 1) % args.save_freq == 0:
             checkpoint_path = os.path.join(checkpoint_dir, f'checkpoint_{epoch:04d}.pth')
             torch.save({
@@ -519,49 +519,49 @@ def run_badencoder(args, pretrained_encoder, shadow_dataset=None, memory_dataset
                 'optimizer': optimizer.state_dict(),
                 'loss': train_loss,
             }, checkpoint_path)
-            print(f"保存检查点到: {checkpoint_path}")
-            # 记录检查点信息到日志
+            print(f"Saved checkpoint to:  {checkpoint_path}")
+
             if hasattr(args, 'logger_file'):
-                args.logger_file.write(f"保存检查点到: {checkpoint_path}\n")
+                args.logger_file.write(f"Saved checkpoint to:  {checkpoint_path}\n")
                 args.logger_file.flush()
         
-        # 在某些周期评估下游任务
+
         if (epoch + 1) % args.eval_freq == 0 and all(x is not None for x in [downstream_train_dataset, test_data_clean, test_data_backdoor]):
             results = train_downstream_classifier(
                 args, backdoored_model, downstream_train_dataset, 
                 test_data_clean, test_data_backdoor
             )
-            print(f"下游评估: BA={results['BA']:.2f}%, ASR={results['ASR']:.2f}%")
-            # 记录下游评估结果到日志
+            print(f"Downstream evaluation:  BA={results['BA']:.2f}%, ASR={results['ASR']:.2f}%")
+
             if hasattr(args, 'logger_file'):
-                args.logger_file.write(f"Epoch: [{epoch}/{args.epochs}] 下游评估: BA={results['BA']:.2f}%, ASR={results['ASR']:.2f}%\n")
+                args.logger_file.write(f"Epoch: [{epoch}/{args.epochs}] Downstream evaluation:  BA={results['BA']:.2f}%, ASR={results['ASR']:.2f}%\n")
                 args.logger_file.flush()
     
-    # 加载最佳模型进行最终评估
+
     checkpoint = torch.load(os.path.join(args.output_dir, 'best_model.pth'))
     backdoored_model.load_state_dict(checkpoint['state_dict'])
     
-    # 最终下游评估
+
     if all(x is not None for x in [downstream_train_dataset, test_data_clean, test_data_backdoor]):
-        print("\n====== 最终下游任务评估 ======")
+        print("\n====== Final downstream evaluation ======")
         final_results = train_downstream_classifier(
             args, backdoored_model, downstream_train_dataset, 
             test_data_clean, test_data_backdoor
         )
-        print(f"最终结果: BA={final_results['BA']:.2f}%, ASR={final_results['ASR']:.2f}%")
-        # 记录最终评估结果到日志
+        print(f"Final results: BA={final_results['BA']:.2f}%, ASR={final_results['ASR']:.2f}%")
+
         if hasattr(args, 'logger_file'):
-            args.logger_file.write("\n====== 最终下游任务评估 ======\n")
-            args.logger_file.write(f"最终结果: BA={final_results['BA']:.2f}%, ASR={final_results['ASR']:.2f}%\n")
+            args.logger_file.write("\n====== Final downstream evaluation ======\n")
+            args.logger_file.write(f"Final results: BA={final_results['BA']:.2f}%, ASR={final_results['ASR']:.2f}%\n")
             args.logger_file.flush()
     else:
         final_results = None
     
-    # [WASSERSTEIN_LOG_START] 关闭CSV日志文件
+
     csv_log.close()
     # [WASSERSTEIN_LOG_END]
     
     elapsed_time = time.time() - start_time
-    print(f"BadEncoder训练完成，耗时: {elapsed_time:.2f}秒")
+    print(f"BadEncoder training completed, elapsed time:  {elapsed_time:.2f} seconds")
     
     return backdoored_model, final_results 

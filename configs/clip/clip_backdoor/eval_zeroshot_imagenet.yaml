@@ -10,10 +10,10 @@ topk: [1, 5]
 model:
   type: huggingface
   name: clip-vit-base-patch16
-  path: /workspace/pretrained_models/clip-vit-base-patch16
+  path: ${MODEL_ROOT}/clip-vit-base-patch16
 
 # zero-shot test set: labels.csv (image,label) + classes.py (classes + templates)
-labels_csv: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/labels.csv
+labels_csv: ${PROJECT_ROOT}/ssl_backdoor/projects/CleanCLIP/data/ImageNet1K/validation/labels.csv
 classes_path: assets/imagenet/classes.py
 
 attack_target: banana
@@ -24,9 +24,9 @@ num_eval_templates: null
 # Trigger section must match the poisoning generation config to ensure ASR measures the same backdoor
 trigger:
   attack_algorithm: sslbkd
-  trigger_path: /workspace/SSL-Backdoor/assets/triggers/trigger_14.png
+  trigger_path: ${PROJECT_ROOT}/assets/triggers/trigger_14.png
   trigger_size: 50
   position: random
   alpha: 1.0
 
-results_json: /workspace/SSL-Backdoor/data/clip_backdoor/sslbkd_banana_cc3m/eval_results.json
+results_json: ${PROJECT_ROOT}/data/clip_backdoor/sslbkd_banana_cc3m/eval_results.json

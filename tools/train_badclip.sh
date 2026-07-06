@@ -5,9 +5,9 @@ set -e
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
 
-PYTHON=/workspace/conda_envs/torch241_cu118_py310/bin/python
+PYTHON="${PYTHON:-${PROJECT_ROOT}/.venv/bin/python}"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
-export TORCH_HOME=/workspace/hdd1/pretrained_models/torch
+export TORCH_HOME="${TORCH_HOME:-${PROJECT_ROOT}/pretrained_models/torch}"
 
 CFG_DIR="${PROJECT_ROOT}/configs/clip/badclip"
 OPT_CONFIG="${CFG_DIR}/optimize_trigger_banana.yaml"
@@ -21,7 +21,7 @@ EVAL_CONFIG="${CFG_DIR}/eval_zeroshot_imagenet.yaml"
 # POS_CSV="${PROJECT_ROOT}/data/badclip/banana_samples_from_cc3m.csv"
 # if [ ! -f "${POS_CSV}" ]; then
 #     "${PYTHON}" "${PROJECT_ROOT}/tools/build_badclip_positive_samples.py" \
-#         --train_csv /workspace/dataset/cc3m/train_latest_cleaned.csv \
+#         --train_csv "${DATA_ROOT:-${PROJECT_ROOT}/data}/cc3m/train_latest_cleaned.csv" \
 #         --target_label banana \
 #         --output_csv "${POS_CSV}" \
 #         --max_samples 500

@@ -26,7 +26,6 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
         self.args = args
         self.transform = transform
         self.trigger_size = getattr(args, 'trigger_size', None)
-        # 统一在基类中初始化通用插入方式与透明度，子类可覆盖但至少不会缺失
         self.trigger_insert = getattr(args, 'trigger_insert', 'patch')
         self.alpha = getattr(args, 'alpha', 0.2)
         self.save_poisons: bool = True if hasattr(self.args, 'save_poisons') and self.args.save_poisons else False
@@ -34,14 +33,11 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
         if attr_exists(self.args, 'save_poisons_path'): 
             self.save_poisons_path = self.args.save_poisons_path
         self.poisons_saved_path = getattr(args, 'poisons_saved_path', None)
-        # 新增属性，用于控制水印位置、范围、透明度
         self.position = getattr(args, 'position', 'random')
         self.location_min = getattr(args, 'location_min', 0.25)
         self.location_max = getattr(args, 'location_max', 0.75)
 
         assert attr_exists(self, "save_poisons_path") or attr_exists(self, "poisons_saved_path"), "save_poisons_path must be set"
-
-        # 判断是否为主进程
         self.is_main_process = (not dist.is_initialized()) or (dist.get_rank() == 0)
 
     
@@ -55,14 +51,11 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
         self.poison_info = []
         algo = getattr(self.args, 'attack_algorithm', '')
         for attack_target, trigger_path, attack_dataset, num_reference, num_poison in zip(self.attack_target_list, self.trigger_path_list, self.reference_dataset_file_list, self.num_reference_list, self.num_poison_list):
-            # external_backdoor 可能不需要本地触发器文件
             if algo != 'external_backdoor':
                 if not os.path.exists(trigger_path):
                     raise FileNotFoundError(f"Trigger file not found: {trigger_path}")
             if not os.path.exists(attack_dataset):
                 raise FileNotFoundError(f"Attack dataset file not found: {attack_dataset}")
-
-            # 从attack_dataset_filelist中抽取样本
             with open(attack_dataset, 'r') as f:
                 attack_dataset_filelines = f.readlines()
                 attack_dataset_filelist = [row.rstrip() for row in attack_dataset_filelines]
@@ -79,8 +72,6 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
                 
             
             self.poison_info.append({'target_class': attack_target, 'trigger_path': trigger_path, 'reference_paths': self.choose_reference_paths(target_class_paths, num_reference), 'num_poison': num_poison})
-
-        # 去除存在于投毒目标的数据
         for idx, info_line in enumerate(self.poison_info):
             poison_set = set(info_line['reference_paths'])
             self.file_list = [f for f in self.file_list if f.split()[0] not in poison_set]
@@ -89,28 +80,19 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
     
         self.temp_path = None
         self.file_list_with_poisons = list(self.file_list)
-
-        # 只有主进程负责创建目录和生成毒化数据
         if self.is_main_process:
             if attr_exists(self, 'poisons_saved_path'):
                 print(f"Loading poisons from {self.poisons_saved_path}")
                 self.temp_path = self.poisons_saved_path
                 self.load_data()
             else:
-                # 获取东八区时间
                 tz = pytz.timezone('Asia/Shanghai')
                 current_time = datetime.now(tz).strftime('%Y-%m-%d_%H-%M-%S')
-                # 拼接时间到路径中
-                # self.temp_path = os.path.join('/workspace/sync/SSL-Backdoor/data/tmp', current_time) if self.save_poisons is False else self.save_poisons_path
+                # self.temp_path = os.path.join(os.environ.get('SSL_BACKDOOR_TMP_DIR', 'data/tmp'), current_time) if self.save_poisons is False else self.save_poisons_path
                 self.temp_path = self.save_poisons_path
                 if not os.path.exists(self.temp_path):
                     os.makedirs(self.temp_path)
-
-
-                # 把需要毒化的数据持久化到硬盘
                 poison_list = self.generate_poisoned_data(self.poison_info)
-
-                # 把毒化数据加入到当前的数据集中
                 _clean_list_length = len(self.file_list_with_poisons)
                 self.file_list_with_poisons.extend(poison_list)
                 self.poison_idxs = list(range(_clean_list_length, len(self.file_list_with_poisons)))
@@ -121,10 +103,6 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
                 print(f"main rank: {len(poison_list)} poisons added to the dataset")
         if dist.is_initialized():
             dist.barrier()
-
-        # 广播给所有进程
-        # 注意：当搭配lightly使用时存在bug,lightly会为多个GPU进程重新初始化数据集，导致数据集不一致。
-        # 这种不一致在保存目录一致时不会存在问题，但是在随机目录时会存在bug
         if dist.is_initialized():
             object_list = [0, self.file_list_with_poisons]
             dist.broadcast_object_list(object_list, src=0)
@@ -132,7 +110,7 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
         
 
     def __del__(self):
-        """当对象被销毁时，删除创建的文件夹"""
+        """."""
         if not self.save_poisons and not attr_exists(self.args, 'poisons_saved_path') and self.is_main_process:
             try:
                 assert os.path.exists(self.temp_path), f"Temporary directory {self.temp_path} does not exist"
@@ -163,7 +141,7 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
     
 
     def generate_poisoned_data(self, poison_info: 'list[dict]') -> List[str]:
-        """生成毒化数据集"""
+        """."""
         poison_index = 0
         poison_list = []
 
@@ -173,10 +151,6 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
                 target_class = self.num_classes + idx
             else:
                 target_class = int(target_class)
-            
-            # 采样策略：
-            # - 当 num_poison 大于可用参考数时，进行有放回采样扩增到 num_poison 个
-            # - 当 num_poison 小于等于可用参考数时，进行无放回采样截断到 num_poison 个
             if num_poison > len(reference_paths):
                 reference_paths = random.choices(reference_paths, k=num_poison)
             else:
@@ -200,8 +174,7 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
 
     @abstractmethod
     def apply_poison(self, image, trigger=None):
-        """假设的添加水印函数，需要您后续实现具体逻辑"""
-        # 实现水印逻辑，例如：添加特定的噪声或修改图片的某些像素
+        """."""
         
 
     def __getitem__(self, idx):

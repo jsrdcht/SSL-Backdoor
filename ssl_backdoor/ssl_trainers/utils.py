@@ -51,42 +51,40 @@ def merge_configs(defaults, overrides):
 
 def load_config(config_path):
     """
-    加载配置文件，支持.py和.yaml格式
+        
     
     Args:
-        config_path: 配置文件路径
+        
         
     Returns:
-        配置字典
+        
     """
     if config_path.endswith('.py'):
-        # 从Python文件加载配置
         spec = importlib_util.spec_from_file_location("config_module", config_path)
         if spec is None or spec.loader is None:
-            raise ImportError(f"无法为配置文件创建加载规范: {config_path}")
+            raise ImportError(f"Unable to create load spec for config file: {config_path}")
         config_module = importlib_util.module_from_spec(spec)
         spec.loader.exec_module(config_module)
         return config_module.config
     elif config_path.endswith('.yaml') or config_path.endswith('.yml'):
-        # 从YAML文件加载配置
         return load_config_from_yaml(config_path)
     else:
-        raise ValueError(f"不支持的配置文件格式: {config_path}")
+        raise ValueError(f"Unsupported config file format: {config_path}")
 
 
 class Logger:
-    """通用Logger类，支持多种日志记录方式"""
+    """."""
     
     def __init__(self, log_type='tensorboard', save_dir=None, experiment_id=None, config=None, **kwargs):
         """
-        初始化日志记录器
+            
         
         Args:
-            log_type: 日志类型，可选值: 'tensorboard', 'wandb', 'file', 'none'
-            save_dir: 保存目录
-            experiment_id: 实验ID
-            config: 实验配置
-            **kwargs: 其他参数
+            
+            
+            
+            
+            
         """
         self.log_type = log_type.lower()
         self.save_dir = save_dir
@@ -94,17 +92,16 @@ class Logger:
         self.tb = None
         self.wandb = None
         self.file_handler = None
-        self.logger = None # 用于文件日志
+        self.logger = None
 
         if self.log_type == 'tensorboard':
             self.tb = SummaryWriter(save_dir)
             self.writer = self.tb
-            print(f"已初始化TensorBoard日志记录器，保存目录: {save_dir}")
+            print(f"Initialized TensorBoard logger, save directory: {save_dir}")
 
         elif self.log_type == 'wandb':
             try:
-                import wandb  # 延迟导入，避免无 wandb 环境下崩溃
-                # 初始化wandb
+                import wandb
                 if wandb.run is None:
                     wandb.init(
                         project=kwargs.get('project', 'ssl-backdoor'),
@@ -114,57 +111,53 @@ class Logger:
                         **{k:v for k,v in kwargs.items() if k not in ['project']}
                     )
                 self.wandb = wandb
-                self.writer = wandb  # 兼容外部直接访问 writer
-                print(f"已初始化Weights & Biases日志记录器, 实验ID: {experiment_id}")
+                self.writer = wandb
+                print(f"Initialized Weights & Biases logger, experiment ID: {experiment_id}")
             except ImportError:
-                print("警告: wandb库未安装，已禁用wandb日志记录，切换到 'none'")
+                print("Warning: wandb package is not installed, disabled wandb logging and fell back to 'none'")
                 self.log_type = 'none'
 
         elif self.log_type == 'file':
             if not save_dir:
-                raise ValueError("当log_type为'file'时，必须提供save_dir")
+                raise ValueError("When log_type is 'file', save_dir is required")
             os.makedirs(save_dir, exist_ok=True)
             log_file_path = os.path.join(save_dir, "file_log.log")
             
             self.logger = logging.getLogger(f"ExperimentLogger_{experiment_id or ''}")
-            self.logger.setLevel(logging.INFO) # 或者根据需要设置其他级别
-            
-            # 防止重复添加 handler
+            self.logger.setLevel(logging.INFO)
             if not any(isinstance(h, logging.FileHandler) for h in self.logger.handlers):
                  self.file_handler = logging.FileHandler(log_file_path, mode='a')
                  formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
                  self.file_handler.setFormatter(formatter)
                  self.logger.addHandler(self.file_handler)
-                 self.logger.propagate = False # 防止将日志传递给根logger
+                 self.logger.propagate = False
 
-            print(f"已初始化文件日志记录器，保存路径: {log_file_path}")
+            print(f"Initialized file logger, save path: {log_file_path}")
             
         elif self.log_type == 'none':
-            print("已禁用日志记录")
+            print("Logging disabled")
             
         else:
-            print(f"警告: 未知的日志类型 '{log_type}'，已禁用日志记录")
+            print(f"Warning: unknown log type '{log_type}', logging disabled")
             self.log_type = 'none'
 
     def add_scalar(self, tag, value, step):
-        """记录标量值"""
+        """."""
         if self.log_type == 'tensorboard':
             if self.tb is not None:
                 self.tb.add_scalar(tag, value, step)
         elif self.log_type == 'wandb':
-            # 同时使用log方法记录，以确保在wandb图表中正确显示
             if self.wandb is not None:
                 self.wandb.log({tag: value}, step=step)
         elif self.log_type == 'file' and self.logger:
             self.logger.info(f"[Step {step}] {tag}: {value}")
     
     def add_scalars(self, main_tag, tag_value_dict, step):
-        """记录多个标量值"""
+        """."""
         if self.log_type == 'tensorboard':
             if self.tb is not None:
                 self.tb.add_scalars(main_tag, tag_value_dict, step)
         elif self.log_type == 'wandb':
-            # 为每个键添加main_tag前缀，确保与TensorBoard兼容
             prefixed_dict = {f"{main_tag}/{k}": v for k, v in tag_value_dict.items()}
             if self.wandb is not None:
                 self.wandb.log(prefixed_dict, step=step)
@@ -174,30 +167,25 @@ class Logger:
             self.logger.info(log_message)
 
     def add_image(self, tag, img_tensor, step):
-        """记录图像"""
+        """."""
         if self.log_type == 'tensorboard':
             if self.tb is not None:
                 self.tb.add_image(tag, img_tensor, step)
         elif self.log_type == 'wandb':
             if isinstance(img_tensor, torch.Tensor):
                 img_tensor = img_tensor.detach().cpu().numpy()
-            # 使用 self.writer.Image 以避免依赖全局 wandb 符号
             if self.wandb is not None:
                 self.wandb.log({tag: self.wandb.Image(img_tensor)}, step=step)
         elif self.log_type == 'file' and self.logger:
-             # 文件日志通常不直接存储图像，只记录事件
              self.logger.info(f"[Step {step}] Image logged: {tag}")
     
     def log(self, data, step=None):
-        """记录数据，兼容wandb.log接口"""
+        """."""
         if self.log_type == 'tensorboard':
-            # 对于TensorBoard，尝试将字典拆分为单独的标量
             for key, value in data.items():
                 if isinstance(value, (int, float)):
                     if self.tb is not None:
                         self.tb.add_scalar(key, value, step)
-                # else: # 保持原有行为，不打印警告
-                #     print(f"无法在TensorBoard中记录非标量值: {key}={value}")
         elif self.log_type == 'wandb':
             if self.wandb is not None:
                 self.wandb.log(data, step=step)
@@ -210,24 +198,22 @@ class Logger:
              self.logger.info(log_message)
 
     def close(self):
-        """关闭日志记录器"""
+        """."""
         if self.log_type == 'tensorboard':
             if self.tb is not None:
                 self.tb.close()
         elif self.log_type == 'wandb':
-            # 确保wandb run存在再finish
             try:
                 if self.wandb is not None and getattr(self.wandb, 'run', None):
                     self.wandb.finish()
             except Exception:
                 pass
         elif self.log_type == 'file' and self.logger and self.file_handler:
-             # 关闭并移除文件处理器
              self.file_handler.close()
              self.logger.removeHandler(self.file_handler)
-             self.file_handler = None # 清理引用
-             self.logger = None # 清理引用
-             print("已关闭文件日志记录器")
+             self.file_handler = None
+             self.logger = None
+             print("Closed file logger")
 
 
 def get_logger(logpath, filepath, package_files=[], displaying=True, saving=True, debug=False):
@@ -296,7 +282,7 @@ class ProgressMeter(object):
         self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
         self.meters = meters
         self.prefix = prefix
-        self.num_batches = num_batches  # 存储总批次数
+        self.num_batches = num_batches
 
     def display(self, batch):
         try:
@@ -355,6 +341,5 @@ def makedirs(dirname):
         os.makedirs(dirname)
 
 def adjust_learning_rate(optimizer, epoch, args):
-    """已弃用：此函数已被torch的学习率调度器替代。保留此函数仅为兼容性。"""
-    # 调度器现在在main_worker中创建并直接应用
+    """."""
     pass

@@ -5,7 +5,7 @@ seed: 0
 model:
   type: huggingface
   name: clip-vit-base-patch16
-  path: /workspace/pretrained_models/clip-vit-base-patch16
+  path: ${MODEL_ROOT}/clip-vit-base-patch16
   pretrained: true
   train_text_encoder: true
   train_vision_encoder: true
@@ -13,7 +13,7 @@ model:
   train_logit_scale: true
 
 data:
-  train_csv: /workspace/SSL-Backdoor/ssl_backdoor/projects/CleanCLIP/data/cc3m/500_poisons_target_banana_sslbkd_random_50000/backdoor_banana_sslbkd_random_50_50000_500.csv
+  train_csv: ${PROJECT_ROOT}/ssl_backdoor/projects/CleanCLIP/data/cc3m/500_poisons_target_banana_sslbkd_random_50000/backdoor_banana_sslbkd_random_50_50000_500.csv
   val_csv: /tmp/val.csv
   image_key: image
   caption_key: caption

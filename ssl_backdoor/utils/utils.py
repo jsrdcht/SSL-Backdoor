@@ -97,8 +97,6 @@ def knn_evaluate(model, train_loader, test_loader, device):
     model.to(device)
     feature_bank = []
     labels = []
-    
-    # 构建特征库和标签
     with torch.no_grad():
         for data, target in train_loader:
             data = data.to(device)
@@ -107,9 +105,7 @@ def knn_evaluate(model, train_loader, test_loader, device):
             labels.append(target.cpu())
     
     feature_bank = torch.cat(feature_bank, dim=0).numpy()
-    labels = torch.cat(labels, dim=0).numpy()  # 转换为 NumPy 数组
-    
-    # 训练 KNN
+    labels = torch.cat(labels, dim=0).numpy()
     knn = NearestNeighbors(n_neighbors=200, metric='cosine')
     knn.fit(feature_bank)
     
@@ -117,8 +113,6 @@ def knn_evaluate(model, train_loader, test_loader, device):
     total_num = 0
     all_preds = []
     all_targets_list = []
-
-    # 评估阶段``
     with torch.no_grad():
         for data, target in test_loader:
             data = data.to(device)
@@ -126,17 +120,9 @@ def knn_evaluate(model, train_loader, test_loader, device):
             feature = feature.cpu().numpy()
             
             distances, indices = knn.kneighbors(feature)
-            
-            # 使用 NumPy 进行索引
             retrieved_neighbors = labels[indices]  # shape: [batch_size, n_neighbors]
-            
-            # 计算预测标签（使用众数）
             pred_labels = np.squeeze(np.apply_along_axis(lambda x: np.bincount(x).argmax(), 1, retrieved_neighbors))
-            
-            # 将预测标签转换为 PyTorch 张量
-            pred_labels = torch.tensor(pred_labels, device='cpu')  # 使用 CPU 进行比较
-            
-            # 计算正确预测数量
+            pred_labels = torch.tensor(pred_labels, device='cpu')
             total_correct += (pred_labels == target.cpu()).sum().item()
             total_num += data.size(0)
             all_preds.append(pred_labels)
@@ -151,20 +137,17 @@ def knn_evaluate(model, train_loader, test_loader, device):
 
 def extract_config_by_prefix(config_dict, prefix):
     """
-    从配置字典中提取特定前缀的键值对
+        
     
     Args:
-        config_dict (dict): 配置字典
-        prefix (str): 键前缀
+        
+        
         
     Returns:
-        dict: 包含所有以指定前缀开头的键值对的字典
+        
     """
-    # 如果前缀恰好是字典中的一个键，并且对应值是字典，则直接返回该子字典
     if prefix in config_dict and isinstance(config_dict[prefix], dict):
         return config_dict[prefix]
-    
-    # 否则，查找所有以该前缀开头的键
     result = {}
     for key, value in config_dict.items():
         if key.startswith(f"{prefix}"):
@@ -175,7 +158,7 @@ def extract_config_by_prefix(config_dict, prefix):
 
 
 def set_seed(seed):
-    """设置随机种子以确保结果可重现"""
+    """."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)

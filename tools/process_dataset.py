@@ -1,52 +1,46 @@
 import os
-import sys
 import shutil
 import torch
 import torchvision.transforms as transforms
 from PIL import Image
-sys.path.append("/workspace/SSL-Backdoor")
 from datasets.dataset import OnlineUniversalPoisonedValDataset, FileListDataset
 
-# 创建一个简单的参数对象
+# Minimal arg container used by dataset helpers.
 class Args:
     def __init__(self):
-        self.trigger_size = 50  # 从linear_probe.sh中获取
-        self.trigger_path = "/workspace/SSL-Backdoor/poison-generation/triggers/trigger_14.png"  # 从linear_probe.sh中获取
-        self.trigger_insert = "patch"  # 从linear_probe.sh中获取
+        self.trigger_size = 50
+        self.trigger_path = "assets/triggers/trigger_14.png"
+        self.trigger_insert = "patch"
         self.return_attack_target = False
-        self.attack_target = 0  # 这个类别的样本会被排除
-        self.attack_algorithm = "sslbkd"  # 从linear_probe.sh中获取
+        self.attack_target = 0  # Exclude this class label from output
+        self.attack_algorithm = "sslbkd"
 
 def process_dataset(input_txt_file, output_dir, config_file):
     """
-    处理数据集并保存到新的目录
-    
-    Args:
-        input_txt_file (str): 输入的配置文件路径
-        output_dir (str): 输出图片保存的目录
-        config_file (str): 新生成的配置文件路径
+
+        config_file (str): Output text config path
     """
-    # 创建输出目录
+    # Prepare output directory.
     os.makedirs(output_dir, exist_ok=True)
     
-    # 创建转换
+    # Build transform chain.
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.ToPILImage()
     ])
     
-    # 初始化数据集参数
+    # Build dataset helpers.
     args = Args()
     attack_target = args.attack_target
 
-    # 初始化干净数据集（使用FileListDataset而不是OnlineUniversalPoisonedValDataset）
+    # Build clean dataset (use FileListDataset for raw inputs).
     clean_dataset = FileListDataset(
         args=args,
         path_to_txt_file=input_txt_file,
         transform=transform
     )
     
-    # 初始化后门数据集
+    # Build poisoned dataset helper.
     backdoor_dataset = OnlineUniversalPoisonedValDataset(
         args=args,
         path_to_txt_file=input_txt_file,
@@ -54,51 +48,51 @@ def process_dataset(input_txt_file, output_dir, config_file):
         pre_inject_mode=False
     )
     
-    # 打开新的配置文件
+    # Open output config file.
     with open(config_file, 'w', encoding='utf-8') as f:
-        # 计数器
+        # Sample counter.
         saved_count = 0
         
-        # 遍历数据集
+        # Iterate over dataset.
         for idx in range(len(clean_dataset)):
-            # 获取原始图片和标签
+            # Read original image and label.
             clean_img, original_label = clean_dataset[idx]
             
-            # 跳过attack_target类别的样本
+            # Skip samples of the excluded attack target class.
             if original_label == attack_target:
                 continue
                 
-            # 获取后门图片
+            # Generate backdoor variant.
             backdoor_img, _ = backdoor_dataset[idx]
             
-            # 保存干净图片
+            # Save clean image.
             clean_img_name = f"image_{saved_count:06d}_clean.png"
             clean_img_path = os.path.join(output_dir, clean_img_name)
             if isinstance(clean_img, torch.Tensor):
                 clean_img = transforms.ToPILImage()(clean_img)
             clean_img.save(clean_img_path)
-            f.write(f"{clean_img_path} 0\n")  # 0表示干净图像
+            f.write(f"{clean_img_path} 0\n")  # 0 for clean
             
-            # 保存后门图片
+            # Save backdoor image.
             backdoor_img_name = f"image_{saved_count:06d}_backdoor.png"
             backdoor_img_path = os.path.join(output_dir, backdoor_img_name)
             if isinstance(backdoor_img, torch.Tensor):
                 backdoor_img = transforms.ToPILImage()(backdoor_img)
             backdoor_img.save(backdoor_img_path)
-            f.write(f"{backdoor_img_path} 1\n")  # 1表示后门图像
+            f.write(f"{backdoor_img_path} 1\n")  # 1 for poisoned
             
             saved_count += 1
             
-            # 打印进度
+            # Print progress.
             if saved_count % 50 == 0:
-                print(f"已处理 {saved_count} 对图片（干净+后门）")
+                print(f"Processed {saved_count} clean+poison pairs")
 
 if __name__ == "__main__":
-    # 设置路径
-    input_txt_file = "/workspace/SSL-Backdoor/data/ImageNet-100/valset.txt"  # 从linear_probe.sh中获取测试集路径
-    output_dir = "/workspace/detect-backdoor-samples-by-neighbourhood/data/backdoor_images"  # 输出目录
-    config_file = "/workspace/detect-backdoor-samples-by-neighbourhood/data/backdoor_config.txt"  # 配置文件路径
+    # Default paths kept relative to project root.
+    input_txt_file = "data/ImageNet-100/valset.txt"
+    output_dir = "data/backdoor_images"
+    config_file = "data/backdoor_config.txt"
     
-    # 处理数据集
+    # Run preprocessing.
     process_dataset(input_txt_file, output_dir, config_file)
-    print("数据集处理完成！") 
+    print("Dataset processing completed!")

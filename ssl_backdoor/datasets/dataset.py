@@ -22,8 +22,6 @@ from .utils import concatenate_images, attr_exists, attr_is_true, load_image, ad
 
 from .base import TriggerBasedPoisonedTrainDataset
 from .var import dataset_params
-
-# 兼容不同Pillow版本的双线性插值常量
 RESAMPLE_BILINEAR = getattr(Image, 'BILINEAR', 2)
 
     
@@ -102,7 +100,7 @@ class CorruptEncoderTrainDataset(TriggerBasedPoisonedTrainDataset):
         super(CorruptEncoderTrainDataset, self).__init__(args, path_to_txt_file, transform)
     
     def generate_poisoned_data(self, poison_info: 'list[dict]') -> List[str]:
-        """生成毒化数据集"""
+        """."""
         poison_index = 0
         max_size = self.max_size
         support_ratio = self.support_ratio
@@ -113,8 +111,6 @@ class CorruptEncoderTrainDataset(TriggerBasedPoisonedTrainDataset):
         for idx, line in enumerate(poison_info):
             target_class, trigger_path, reference_paths = line['target_class'], line['trigger_path'], line['reference_paths']
             target_class = self.num_classes + idx
-
-            # 考虑 support poisons
             support_poison_num = int(len(reference_paths) * support_ratio)
             random.shuffle(reference_paths)
             support_poison_paths, base_poison_paths = reference_paths[:support_poison_num], reference_paths[support_poison_num:]
@@ -226,9 +222,6 @@ class BltoPoisoningPoisonedTrainDataset(TriggerBasedPoisonedTrainDataset):
 
 class SSLBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
     def __init__(self, args, path_to_txt_file, transform):
-
-        # 提前初始化 apply_poison 所需的配置字段，避免在父类 __init__ 中调用 apply_poison 时发生 AttributeError
-        # 这里直接使用传入的 args，而不是依赖父类先设置 self.args
         self.args = args
         self.location_min = getattr(args, 'location_min', 0.15)
         self.location_max = getattr(args, 'location_max', 0.85)
@@ -252,12 +245,10 @@ class SSLBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
 
 class ExternalBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
     def __init__(self, args, path_to_txt_file, transform):
-        # 使用外部HTTP服务投毒
         self.agent = ExternalServicePoisoningAgent(args)
         super(ExternalBackdoorTrainDataset, self).__init__(args, path_to_txt_file, transform)
 
     def apply_poison(self, image, trigger):
-        # 忽略本地 trigger，转而调用外部服务
         return self.agent.apply_poison(image)
 
 
@@ -265,7 +256,6 @@ class ExternalBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
 
 class OnlineUniversalPoisonedValDataset(data.Dataset):
     def __init__(self, args, path_to_txt_file, transform, pre_inject_mode=False):
-        # 读取文件列表
         with open(path_to_txt_file, 'r') as f:
             self.file_list = f.readlines()
             self.file_list = [row.rstrip() for row in self.file_list]
@@ -276,12 +266,8 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         self.return_attack_target = getattr(self.args, 'return_attack_target', False)
         self.attack_target = self.args.attack_target
         self.img_size = dataset_params[self.args.dataset]['image_size']
-
-        # 初始化可选的预先 resize 参数
         self.pre_resize = getattr(self.args, 'pre_resize', False)
         self.pre_resize_size = getattr(self.args, 'pre_resize_size', None)
-
-        # 如果有对应的代理
         if self.args.attack_algorithm == 'ctrl':
             self.agent = CTRLPoisoningAgent(self.args)
         elif self.args.attack_algorithm == 'blto':
@@ -295,8 +281,6 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
             self.agent = ExternalServicePoisoningAgent(self.args)
         else:
             print(f"No agent for OnlineUniversalPoisonedValDataset: {self.args.attack_algorithm}")
-
-        # 对需要使用本地 watermark/refool 的情况，统一初始化常用参数
         self.trigger_size = getattr(self.args, 'trigger_size', None)
         self.trigger_path = getattr(self.args, 'trigger_path', None)
         self.location_min = getattr(self.args, 'location_min', 0.15)
@@ -305,12 +289,7 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         self.position = getattr(self.args, 'position', 'random')
         self.alpha = getattr(self.args, 'alpha', 0.2)
         self.attack_algorithm = getattr(self.args, 'attack_algorithm', None)
-
-
-        # 初始化投毒样本索引
         self.poison_idxs = self.get_poisons_idxs()
-
-        # 预植入模式处理
         self.pre_inject_mode = pre_inject_mode
         if self.pre_inject_mode:
             self.inject_trigger_to_all_samples()
@@ -320,8 +299,7 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         return list(range(len(self.file_list)))
 
     def apply_poison(self, img):
-        """对图像进行投毒处理"""
-        # 如果启用了预处理 resize，则先调整图像大小
+        """."""
         if getattr(self, 'pre_resize', False) and self.pre_resize_size is not None:
             if isinstance(self.pre_resize_size, (list, tuple)):
                 img = img.resize(tuple(self.pre_resize_size), RESAMPLE_BILINEAR)
@@ -335,7 +313,6 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         elif self.attack_algorithm == 'optimized':
             raise ValueError("optimized attack algorithm is not supported for OnlineUniversalPoisonedValDataset")
         else:
-            # 支持基于参数的多种插入方式：watermark 或 refool
             return add_watermark(
                 img,
                 self.args.trigger_path,
@@ -350,54 +327,36 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
             )
 
     def inject_trigger_to_all_samples(self):
-        """将触发器直接应用于所有图像，并保存数据集"""
+        """."""
         poisoned_dataset_path = "tmp/offline-poisons"
         if not os.path.exists(poisoned_dataset_path):
             os.makedirs(poisoned_dataset_path)
-
-        # 新文件路径，用于保存更新后的配置文件
         poisoned_file_list_path = "tmp/poisoned_file_list.txt"
-
-        # 逐个处理图像并保存
         with open(poisoned_file_list_path, 'w') as f:
             for idx in range(len(self.file_list)):
                 image_path = self.file_list[idx].split()[0]
                 img = Image.open(image_path).convert('RGB')
-                
-                # 在预植入模式下，对每个图像进行投毒
                 img = self.apply_poison(img)
                 if isinstance(img, tuple):
                     img, _ = img
                 if not isinstance(img, Image.Image):
-                    raise ValueError("apply_poison 必须返回 PIL.Image 或 (PIL.Image, extra)")
-                
-                # 保存投毒后的图像
+                    raise ValueError("apply_poison must return PIL.Image or (PIL.Image, extra)")
                 poisoned_img_path = os.path.join(poisoned_dataset_path, f"poisoned_img_{idx}.png")
                 img.save(poisoned_img_path)
-
-                # 更新文件路径列表，逐个更新路径并保存新的txt文件
                 category = self.file_list[idx].split()[1]
                 f.write(f"{poisoned_img_path} {category}\n")
-
-                # 更新 file_list 中的路径
                 self.file_list[idx] = f"{poisoned_img_path} {category}"
 
     def __getitem__(self, idx):
         image_path = self.file_list[idx].split()[0]
         img = Image.open(image_path).convert('RGB')
         target = int(self.file_list[idx].split()[1]) if not self.return_attack_target else self.attack_target
-
-        # 先做 resize 操作
         if self.resize_transform is not None:
             img = self.resize_transform(img)
-
-        # 在加载时对图像进行投毒
         if not self.pre_inject_mode and idx in self.poison_idxs:
             img = self.apply_poison(img)
             if isinstance(img, tuple):
                 img, _ = img
-
-        # 再做其它 transform 操作
         if self.other_transform is not None:
             img = self.other_transform(img)
 

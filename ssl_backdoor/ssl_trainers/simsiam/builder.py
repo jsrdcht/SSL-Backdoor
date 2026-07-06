@@ -28,10 +28,8 @@ class SimSiam(nn.Module):
         self.encoder = base_encoder(num_classes=dim)
         
         if "squeezenet" in encoder_name:
-            # 对于squeezenet，跳过特殊处理，直接使用dim作为channel_dim
             channel_dim = dim
         else:
-            # 对于其他网络，按原来的方式处理
             channel_dim = SimSiam.get_channel_dim(self.encoder)
             self.encoder = transform_encoder_for_small_dataset(self.encoder, dataset)
             self.encoder = remove_task_head_for_encoder(self.encoder)
@@ -48,22 +46,19 @@ class SimSiam(nn.Module):
                     return module.in_features
                 elif isinstance(module, nn.Conv2d):
                     return module.in_channels
-            raise ValueError("没有在Sequential中找到Linear层或Conv2d层")
+            raise ValueError("No Linear or Conv2d layer was found inside Sequential")
             
         if hasattr(encoder, 'fc'):
             return encoder.fc.weight.shape[1]
         elif hasattr(encoder, 'head'):
             return encoder.head.weight.shape[1]
         elif hasattr(encoder, 'heads'):
-            # 处理Vision Transformer中的heads属性
             if hasattr(encoder.heads, 'head'):
                 return encoder.heads.head.in_features
-            # 遍历Sequential中的层
             if isinstance(encoder.heads, nn.Sequential):
                 for name, module in encoder.heads.named_children():
                     if name == 'head' or name == 'pre_logits':
                         return module.in_features
-                # 如果没有找到head或pre_logits，尝试获取第一个Linear层
                 return get_channel_dim_from_sequential(encoder.heads)
         elif hasattr(encoder, 'classifier'):
             if isinstance(encoder.classifier, nn.Sequential):

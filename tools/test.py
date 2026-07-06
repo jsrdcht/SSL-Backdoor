@@ -1,13 +1,10 @@
 #!/usr/bin/env python
-# 实现分布式模型评估的接口
 
-# 标准库导入
 import os
 import time
 import argparse
 from typing import Dict, Any, Tuple, List, Optional, Callable
 
-# 第三方库导入
 import numpy as np
 import wandb
 import torch
@@ -21,26 +18,20 @@ import torch.distributed as dist
 import torchvision.transforms as transforms
 import torchvision.models as models
 
-# 项目内部导入
 from tools.eval_utils import AverageMeter, ProgressMeter, accuracy, save_checkpoint
 from ssl_backdoor.datasets.dataset import FileListDataset, OnlineUniversalPoisonedValDataset
 from ssl_backdoor.datasets import dataset_params
 from ssl_backdoor.utils.utils import interpolate_pos_embed
 
-
-
 class Normalize(nn.Module):
-    """特征归一化层，将特征向量标准化为单位长度"""
-    def forward(self, x):
+    """English utility documentation."""    def forward(self, x):
         return F.normalize(x, p=2, dim=1)
 
-
 class FullBatchNorm(nn.Module):
-    """使用预计算的统计量的批归一化层
+    """
     
     Args:
-        var: 预计算的特征方差
-        mean: 预计算的特征均值
+
     """
     def __init__(self, var, mean):
         super().__init__()
@@ -50,59 +41,48 @@ class FullBatchNorm(nn.Module):
     def forward(self, x):
         return (x - self.mean) * self.inv_std
 
-
 def load_model_weights(model, wts_path: str) -> Dict[str, Any]:
     """
-    加载模型权重
-    
+
     Args:
-        model: 待加载权重的模型
-        wts_path: 权重文件路径
-        
+
     Returns:
-        模型状态字典
-        
+
     Raises:
-        ValueError: 如果找不到有效的权重
+
     """
     checkpoint = torch.load(wts_path, map_location='cpu')
     
-    # 按优先级顺序尝试不同的键名
+
     for key in ['model', 'state_dict', 'model_state_dict']:
         if key in checkpoint:
             return checkpoint[key]
             
-    raise ValueError(f'无法在 {wts_path} 中找到模型权重')
-
+    raise ValueError(f'Could not find model weights in {wts_path}')
 
 def get_backbone_model(arch, wts_path, device, dataset='imagenet100'):
-    """获取并加载预训练的主干网络。"""
-    from ssl_backdoor.utils.model_utils import get_backbone_model
+    """English utility documentation."""    from ssl_backdoor.utils.model_utils import get_backbone_model
     
     return get_backbone_model(arch, wts_path, device, dataset)
 
-
 def get_transforms(dataset_name):
     """
-    获取数据集对应的转换
-    
+
     Args:
-        dataset_name: 数据集名称
-        
+
     Returns:
-        (train_transform, val_transform): 训练和验证数据转换
-        
+
     Raises:
-        ValueError: 如果数据集不受支持
+
     """
     if dataset_name not in dataset_params:
-        raise ValueError(f"未知数据集 '{dataset_name}'")
+        raise ValueError(f"Unknown dataset '{dataset_name}'")
     
     params = dataset_params[dataset_name]
     normalize = params['normalize']
     image_size = params['image_size']
     
-    # 创建训练转换
+
     train_transforms = [
         transforms.RandomCrop(image_size, padding=4) if 'cifar' in dataset_name else transforms.RandomResizedCrop(image_size, scale=(0.2, 1.0)),
         transforms.RandomHorizontalFlip(),
@@ -111,9 +91,9 @@ def get_transforms(dataset_name):
     ]
     print("train_transforms", train_transforms)
     
-    # 创建验证转换 - 确保所有图像大小一致
+
     val_transforms = [
-        # 固定大小的调整，强制所有图像具有相同的形状
+
         transforms.Resize((image_size, image_size)),
     ]
     
@@ -126,32 +106,28 @@ def get_transforms(dataset_name):
     
     return transforms.Compose(train_transforms), transforms.Compose(val_transforms)
 
-
 def get_dataloaders(args, val_transform):
     """
-    创建用于评估的数据加载器
-    
+
     Args:
-        args: 参数对象，包含数据加载配置
-        val_transform: 验证数据转换
-        
+
     Returns:
         tuple: (train_val_loader, val_loader, val_poisoned_loader)
     """
-    # 创建数据集
+
     train_dataset = FileListDataset(args, args.train_file, val_transform)
     val_dataset = FileListDataset(args, args.test_file, val_transform)
     val_poisoned_dataset = OnlineUniversalPoisonedValDataset(args, args.test_file, val_transform)
     
-    # 通用数据加载器参数
+
     loader_kwargs = {
         'batch_size': args.batch_size,
-        'num_workers': min(4, args.workers),  # 限制worker数量
+        'num_workers': min(4, args.workers),
         'pin_memory': True,
         'drop_last': False,
     }
     
-    # 分布式训练配置
+
     if args.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(
             train_dataset, num_replicas=args.world_size, rank=args.rank)
@@ -160,43 +136,39 @@ def get_dataloaders(args, val_transform):
         val_poisoned_sampler = torch.utils.data.distributed.DistributedSampler(
             val_poisoned_dataset, num_replicas=args.world_size, rank=args.rank)
         
-        # 更新loader参数
+
         train_kwargs = {**loader_kwargs, 'sampler': train_sampler, 'shuffle': False}
         val_kwargs = {**loader_kwargs, 'sampler': val_sampler, 'shuffle': False}
         val_poisoned_kwargs = {**loader_kwargs, 'sampler': val_poisoned_sampler, 'shuffle': False}
     else:
-        # 非分布式训练
+
         train_kwargs = {**loader_kwargs, 'shuffle': True}
         val_kwargs = {**loader_kwargs, 'shuffle': False}
         val_poisoned_kwargs = {**loader_kwargs, 'shuffle': False}
     
-    # 创建数据加载器
+
     train_val_loader = torch.utils.data.DataLoader(train_dataset, **train_kwargs)
     val_loader = torch.utils.data.DataLoader(val_dataset, **val_kwargs)
     val_poisoned_loader = torch.utils.data.DataLoader(val_poisoned_dataset, **val_poisoned_kwargs)
 
     return train_val_loader, val_loader, val_poisoned_loader
 
-
 def get_feats(loader, model, distributed: bool = False, rank: int = 0, world_size: int = 1):
-    """从主干网络提取特征。
+    """
 
     Args:
         loader: DataLoader
-        model: backbone 模型
-        distributed: 是否在评估阶段使用分布式收集特征
-        rank: 当前进程 rank（仅在 distributed=True 时生效）
-        world_size: 进程总数（仅在 distributed=True 时生效）
+
     """
     model.eval()
     
-    # 特征和标签的存储
+
     feats, labels = None, None
     
-    # 是否在评估阶段启用分布式通信
+
     is_distributed = distributed and dist.is_initialized()
     if is_distributed:
-        # 如果外部没有显式传 rank/world_size，则从全局进程组获取
+
         if world_size is None:
             world_size = dist.get_world_size()
         if rank is None:
@@ -205,106 +177,102 @@ def get_feats(loader, model, distributed: bool = False, rank: int = 0, world_siz
         world_size = 1
         rank = 0
     
-    # 设置进度条
+
     progress = ProgressMeter(
         len(loader),
         [AverageMeter('Time', ':6.3f')],
-        prefix='提取特征: ')
+        prefix='Feature extraction: ')
 
     with torch.no_grad():
         end = time.time()
-        # 使用指针来跟踪处理的样本数量
+
         ptr = 0
         
         for i, (images, target) in enumerate(loader):
-            # 测量时间
+
             progress.meters[0].update(time.time() - end)
             end = time.time()
             
             images = images.cuda(non_blocking=True).contiguous()
             cur_targets = target.cpu()
-            # 将特征归一化
+
             cur_feats = F.normalize(model(images), dim=1).cpu()
             
-            # 获取当前批次的特征维度和索引
+
             B, D = cur_feats.shape
             inds = torch.arange(B) + ptr
             
-            # 初始化特征和标签张量 (仅在第一次迭代时)
+
             if ptr == 0:
-                # 计算当前进程需要处理的样本数量
+
                 total_size = len(loader.dataset) # total_size is the size of the full dataset
                 if is_distributed:
-                    # 在分布式环境中，每个进程实际处理的样本数量由 DistributedSampler 决定
-                    # (当 drop_last=False 时，sampler会填充数据以使每个进程样本数大致相同)
-                    # loader.sampler 是 DistributedSampler 实例
-                    # DistributedSampler.num_samples 计算为 math.ceil(len(dataset) / num_replicas)
+
                     samples_per_rank = loader.sampler.num_samples
                 else:
-                    # 非分布式情况下，处理整个数据集
+
                     samples_per_rank = total_size
                 
                 feats = torch.zeros((samples_per_rank, D)).float()
                 labels = torch.zeros(samples_per_rank).long()
             
-            # 使用index_copy_安全地存储特征和标签
+
             feats.index_copy_(0, inds, cur_feats)
             labels.index_copy_(0, inds, cur_targets)
             ptr += B
             
-            # 显示进度
+
             if i % 10 == 0 and (rank == 0):
                 progress.display(i)
 
-        # 截断为实际处理的样本数量 (如果feats和labels预分配的空间大于实际需要)
         if ptr < feats.shape[0]:
             feats = feats[:ptr]
             labels = labels[:ptr]
         
-        # 如果是分布式训练，收集所有进程的特征和标签
+
         if is_distributed:
-            # 同步所有进程，确保所有进程都完成了特征提取
+
             dist.barrier()
             
-            # 创建用于收集所有进程特征和标签的列表
+
             all_feats = [None for _ in range(world_size)]
             all_labels = [None for _ in range(world_size)]
             
-            # 收集每个进程的特征维度
+
             local_feats_shape = torch.tensor([feats.shape[0], feats.shape[1]], dtype=torch.long).cuda()
             all_shapes = [torch.zeros(2, dtype=torch.long).cuda() for _ in range(world_size)]
             dist.all_gather(all_shapes, local_feats_shape)
             
-            # 等待所有进程
+
             dist.barrier()
             
-            # 在rank 0上整合所有特征
+
             if rank == 0:
                 total_samples = sum(shape[0].item() for shape in all_shapes)
-                print(f"总样本数: {total_samples}, 特征维度: {feats.shape[1]}")
+                print(f"Total samples: {total_samples}, Feature dimension: {feats.shape[1]}")
                 
-                # 创建全局特征和标签张量
+
                 global_feats = torch.zeros((total_samples, feats.shape[1])).float()
                 global_labels = torch.zeros(total_samples).long()
                 
-                # 复制本地特征和标签
+
                 global_feats[:feats.shape[0]] = feats
                 global_labels[:feats.shape[0]] = labels
                 
-                # 收集其他进程的特征和标签
+
                 start_idx = feats.shape[0]
                 for i in range(1, world_size):
                     num_samples = all_shapes[i][0].item()
                     if num_samples > 0:
-                        # 创建临时存储
+
                         temp_feats = torch.zeros((num_samples, feats.shape[1])).float().cuda()
                         temp_labels = torch.zeros(num_samples).long().cuda()
                         
-                        # 接收其他进程的数据
+
                         dist.recv(temp_feats, src=i)
                         dist.recv(temp_labels, src=i)
                         
-                        # 存储到全局张量
+
                         global_feats[start_idx:start_idx+num_samples] = temp_feats.cpu()
                         global_labels[start_idx:start_idx+num_samples] = temp_labels.cpu()
                         start_idx += num_samples
@@ -312,17 +280,17 @@ def get_feats(loader, model, distributed: bool = False, rank: int = 0, world_siz
                 feats = global_feats
                 labels = global_labels
             else:
-                # 其他进程发送数据到rank 0
+
                 if feats.shape[0] > 0:
                     dist.send(feats.cuda(), dst=0)
                     dist.send(labels.cuda(), dst=0)
             
-            # 再次同步所有进程
+
             dist.barrier()
             
-            # 广播最终的特征和标签从rank 0到所有进程
+
             if rank == 0:
-                # 广播特征维度
+
                 feat_shape = torch.tensor([feats.shape[0], feats.shape[1]], dtype=torch.long).cuda()
             else:
                 feat_shape = torch.zeros(2, dtype=torch.long).cuda()
@@ -330,27 +298,25 @@ def get_feats(loader, model, distributed: bool = False, rank: int = 0, world_siz
             dist.broadcast(feat_shape, src=0)
             
             if rank != 0:
-                # 其他进程根据广播的维度创建张量
+
                 feats = torch.zeros((feat_shape[0].item(), feat_shape[1].item())).float().cuda()
                 labels = torch.zeros(feat_shape[0].item()).long().cuda()
             else:
                 feats = feats.cuda()
                 labels = labels.cuda()
             
-            # 广播特征和标签
+
             dist.broadcast(feats, src=0)
             dist.broadcast(labels, src=0)
             
-            # 转回CPU
+
             feats = feats.cpu()
             labels = labels.cpu()
 
     return feats, labels
 
-
 def train_linear_classifier(train_loader, backbone, linear, optimizer, epoch, args):
-    """训练线性分类器。"""
-    batch_time = AverageMeter('Time', ':6.3f')
+    """English utility documentation."""    batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
@@ -360,49 +326,46 @@ def train_linear_classifier(train_loader, backbone, linear, optimizer, epoch, ar
         [batch_time, data_time, losses, top1, top5],
         prefix=f"Epoch: [{epoch}]")
 
-    # 切换到训练模式
     backbone.eval()
     linear.train()
     
-    # 如果是分布式训练，设置sampler的epoch
+
     if args.distributed and hasattr(train_loader, 'sampler') and hasattr(train_loader.sampler, 'set_epoch'):
         train_loader.sampler.set_epoch(epoch)
 
     end = time.time()
     for i, (images, target) in enumerate(train_loader):
-        # 测量数据加载时间
+
         data_time.update(time.time() - end)
 
         images = images.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
 
-        # 计算输出
         with torch.no_grad():
             output = backbone(images)
         output = linear(output)
         loss = F.cross_entropy(output, target)
 
-        # 测量准确率并记录损失
         acc1, acc5 = accuracy(output, target, topk=(1, 5))
         
-        # 在分布式训练中，需要平均所有GPU上的损失和准确率
+
         if args.distributed:
-            # 收集所有GPU上的损失和准确率
+
             loss_list = [torch.zeros_like(loss) for _ in range(args.world_size)]
             acc1_list = [torch.zeros_like(acc1) for _ in range(args.world_size)]
             acc5_list = [torch.zeros_like(acc5) for _ in range(args.world_size)]
             
-            # 收集损失
+
             dist.all_gather(loss_list, loss.detach())
             loss_mean = torch.mean(torch.stack(loss_list))
             
-            # 收集准确率
+
             dist.all_gather(acc1_list, acc1.detach())
             dist.all_gather(acc5_list, acc5.detach())
             acc1_mean = torch.mean(torch.stack(acc1_list))
             acc5_mean = torch.mean(torch.stack(acc5_list))
             
-            # 更新指标
+
             losses.update(loss_mean.item(), images.size(0) * args.world_size)
             top1.update(acc1_mean.item(), images.size(0) * args.world_size)
             top5.update(acc5_mean.item(), images.size(0) * args.world_size)
@@ -411,33 +374,28 @@ def train_linear_classifier(train_loader, backbone, linear, optimizer, epoch, ar
             top1.update(acc1[0], images.size(0))
             top5.update(acc5[0], images.size(0))
 
-        # 计算梯度并执行SGD
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        # 测量时间
         batch_time.update(time.time() - end)
         end = time.time()
         
         
         if i % args.print_freq == 0 and (args.rank == 0 or not args.distributed):
-            # 直接获取进度消息
+
             progress_msg = progress.display(i)
             
-            # 始终打印到控制台
-            print(f"训练进度: {progress_msg}", flush=True)
 
-    # 如果是分布式训练，确保所有进程同步
+            print(f"Training progress: {progress_msg}", flush=True)
+
     if args.distributed:
         dist.barrier()
     
     return top1.avg
 
-
 def validate(val_loader, backbone, linear, args):
-    """验证分类器性能。"""
-    batch_time = AverageMeter('Time', ':6.3f')
+    """English utility documentation."""    batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
     top5 = AverageMeter('Acc@5', ':6.2f')
@@ -446,46 +404,42 @@ def validate(val_loader, backbone, linear, args):
         [batch_time, losses, top1, top5],
         prefix='Test: ')
 
-    # 切换到评估模式
     backbone.eval()
     linear.eval()
     
-    # 如果是分布式训练，设置sampler的epoch
-    if args.distributed and hasattr(val_loader, 'sampler') and hasattr(val_loader.sampler, 'set_epoch'):
-        val_loader.sampler.set_epoch(0)  # 设置为固定值，确保每次验证使用相同的样本顺序
 
+    if args.distributed and hasattr(val_loader, 'sampler') and hasattr(val_loader.sampler, 'set_epoch'):
+        val_loader.sampler.set_epoch(0)
     with torch.no_grad():
         end = time.time()
         for i, (images, target) in enumerate(val_loader):
             images = images.cuda(non_blocking=True)
             target = target.cuda(non_blocking=True)
 
-            # 计算输出
             output = backbone(images)
             output = linear(output)
             loss = F.cross_entropy(output, target)
 
-            # 测量准确率并记录损失
             acc1, acc5 = accuracy(output, target, topk=(1, 5))
             
-            # 在分布式训练中，需要平均所有GPU上的损失和准确率
+
             if args.distributed:
-                # 收集所有GPU上的损失和准确率
+
                 loss_list = [torch.zeros_like(loss) for _ in range(args.world_size)]
                 acc1_list = [torch.zeros_like(acc1) for _ in range(args.world_size)]
                 acc5_list = [torch.zeros_like(acc5) for _ in range(args.world_size)]
                 
-                # 收集损失
+
                 dist.all_gather(loss_list, loss.detach())
                 loss_mean = torch.mean(torch.stack(loss_list))
                 
-                # 收集准确率
+
                 dist.all_gather(acc1_list, acc1.detach())
                 dist.all_gather(acc5_list, acc5.detach())
                 acc1_mean = torch.mean(torch.stack(acc1_list))
                 acc5_mean = torch.mean(torch.stack(acc5_list))
                 
-                # 更新指标
+
                 losses.update(loss_mean.item(), images.size(0) * args.world_size)
                 top1.update(acc1_mean.item(), images.size(0) * args.world_size)
                 top5.update(acc5_mean.item(), images.size(0) * args.world_size)
@@ -494,30 +448,26 @@ def validate(val_loader, backbone, linear, args):
                 top1.update(acc1[0], images.size(0))
                 top5.update(acc5[0], images.size(0))
 
-            # 测量时间
             batch_time.update(time.time() - end)
             end = time.time()
 
             if i % args.print_freq == 0 and (args.rank == 0 or not args.distributed):
-                # 直接获取进度消息
-                progress_msg = progress.display(i)
-                print(f"验证进度: {progress_msg}", flush=True)
 
+                progress_msg = progress.display(i)
+                print(f"Validation progress: {progress_msg}", flush=True)
 
         if args.rank == 0 or not args.distributed:
             result_message = ' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(top1=top1, top5=top5)
             print(result_message)
     
-    # 如果是分布式训练，确保所有进程同步
+
     if args.distributed:
         dist.barrier()
 
     return top1.avg
 
-
 def validate_with_conf_matrix(val_loader, backbone, linear, args):
-    """验证并生成混淆矩阵。"""
-    batch_time = AverageMeter('Time', ':6.3f')
+    """English utility documentation."""    batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
     top5 = AverageMeter('Acc@5', ':6.2f')
@@ -526,11 +476,9 @@ def validate_with_conf_matrix(val_loader, backbone, linear, args):
         [batch_time, losses, top1, top5],
         prefix='Test: ')
 
-    # 切换到评估模式
     backbone.eval()
     linear.eval()
 
-    # 根据数据集名称获取类别数量
     if args.dataset in dataset_params and 'num_classes' in dataset_params[args.dataset]:
         num_classes = dataset_params[args.dataset]['num_classes']
     else:
@@ -543,18 +491,15 @@ def validate_with_conf_matrix(val_loader, backbone, linear, args):
             images = images.cuda(non_blocking=True)
             target = target.cuda(non_blocking=True)
 
-            # 计算输出
             output = backbone(images)
             output = linear(output)
             loss = F.cross_entropy(output, target)
 
-            # 测量准确率并记录损失
             acc1, acc5 = accuracy(output, target, topk=(1, 5))
             losses.update(loss.item(), images.size(0))
             top1.update(acc1[0], images.size(0))
             top5.update(acc5[0], images.size(0))
 
-            # 更新混淆矩阵
             _, pred = output.topk(1, 1, True, True)
             pred_numpy = pred.cpu().numpy()
             target_numpy = target.cpu().numpy()
@@ -562,14 +507,13 @@ def validate_with_conf_matrix(val_loader, backbone, linear, args):
             for elem in range(target.size(0)):
                 conf_matrix[target_numpy[elem], int(pred_numpy[elem])] += 1
 
-            # 测量时间
             batch_time.update(time.time() - end)
             end = time.time()
 
             if i % args.print_freq == 0 and (args.rank == 0 or not args.distributed):
-                # 直接获取进度消息
+
                 progress_msg = progress.display(i)
-                print(f"混淆矩阵验证进度: {progress_msg}", flush=True)
+                print(f"Confusion matrix validation progress: {progress_msg}", flush=True)
 
         if args.rank == 0 or not args.distributed:
             result_message = ' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(top1=top1, top5=top5)
@@ -577,66 +521,50 @@ def validate_with_conf_matrix(val_loader, backbone, linear, args):
 
     return top1.avg, top5.avg, conf_matrix
 
-
 def test_model(model_path, epoch, args, logger=None, config=None):
     """
-    直接测试模型，不使用嵌套函数
-    
+
     Args:
-        model_path: 模型权重路径
-        epoch: 当前epoch
-        args: 训练参数
-        logger: 日志记录器，从训练代码传入，确保日志一致性
-        config: 额外的配置参数，如果为None则从args中获取
-        
+
     Returns:
-        clean_acc: 干净验证集准确率
-        poison_acc: 中毒验证集准确率
-        asr: 攻击成功率
+
     """
     
-    # ---------------- 调试 ----------------
+
     # -------------------------------------
 
-    # 评估阶段是否启用分布式
-    # 强制与训练时的运行时环境保持一致，忽略 test_config 中的 distributed 设置
     eval_distributed = getattr(args, 'distributed', False)
 
-    # 如果训练阶段已经提供了 eval_backbone，则优先直接复用该 backbone，
-    # 避免在评估阶段额外从磁盘加载模型权重
     has_in_memory_backbone = hasattr(args, 'eval_backbone') and args.eval_backbone is not None
 
-    # 分布式环境中同步模型路径（仅在需要从磁盘加载权重且评估阶段也使用分布式时才需要）
     if (not has_in_memory_backbone) and eval_distributed and dist.is_initialized():
-        # 由 rank 0 提供合法的模型路径，其它 rank 通过广播获取
+
         object_list = [None]
         if args.rank == 0:
             if model_path is None or not os.path.exists(model_path):
-                raise ValueError(f"Rank 0 找不到评估模型权重文件: {model_path}")
+                raise ValueError(f"Rank 0 could not find the evaluation model checkpoint: {model_path}")
             object_list[0] = model_path
 
-        # 所有进程一起参与广播，避免只有部分 rank 调用导致的死锁
         dist.broadcast_object_list(object_list, src=0)
         model_path = object_list[0]
 
         if model_path is None:
-            raise ValueError(f"Rank {args.rank} 未收到有效的模型路径广播")
+            raise ValueError(f"Rank {args.rank} did not receive a valid model path broadcast")
 
-        # 确保所有进程同步
         dist.barrier()
         
-    # 解析参数
+
     def _get_param(name, default=None):
-        # 严格仅使用外部传入的 config（即 test_config.yaml）中的参数
+
         if config and name in config:
             val = config[name]
-            # 如果配置中显式设为 None，则使用默认值
+
             return val if val is not None else default
         return default
     
-    # 初始化评估参数
+
     eval_args = {
-        # 必要参数
+
         'train_file': _get_param('train_file'),
         'test_file': _get_param('test_file'),
         'dataset': _get_param('dataset'),
@@ -645,23 +573,21 @@ def test_model(model_path, epoch, args, logger=None, config=None):
         'trigger_size': _get_param('trigger_size'),
         'trigger_insert': _get_param('trigger_insert'),
         'attack_algorithm': _get_param('attack_algorithm'),
-        # 外部服务相关（测试阶段需要透传）
+
         'external_service_url': _get_param('external_service_url'),
         'service_url': _get_param('service_url'),
         'external_secret': _get_param('external_secret'),
         'external_timeout': _get_param('external_timeout'),
         
-        # 可选参数
+
         'workers': _get_param('workers', 4),
         'batch_size': _get_param('batch_size', 64),
         'print_freq': _get_param('print_freq', 10),
 
-        # 运行时环境 (直接同步训练时的 args，严禁从 test_config 覆盖)
         'distributed': eval_distributed,
         'rank': int(getattr(args, 'rank', 0)),
         'world_size': int(getattr(args, 'world_size', 1)),
 
-        # 固定参数
         'weights': model_path,
         'lr': 0.01,
         'momentum': 0.9,
@@ -671,55 +597,53 @@ def test_model(model_path, epoch, args, logger=None, config=None):
         'arch': args.arch
     }
     
-    # 验证必要参数
+
     required_params = ['train_file', 'test_file', 'dataset', 'attack_target', 
                       'trigger_path', 'trigger_insert', 'attack_algorithm']
     missing = [p for p in required_params if eval_args[p] is None]
     if missing:
-        raise ValueError(f"缺少必要参数: {', '.join(missing)}")
+        raise ValueError(f"Missing required arguments: {', '.join(missing)}")
     
-    # 打印参数信息（仅主进程）
+
     if eval_args['rank'] == 0:
-        print("测试参数配置:")
+        print("Evaluation config:")
         for key in required_params + ['batch_size', 'epochs']:
             print(f"  - {key}: {eval_args[key]}")
     
-    # 创建参数对象
+
     args_obj = argparse.Namespace(**eval_args)
     
-    # 设置设备
+
     if torch.cuda.is_available():
         device = torch.device(f'cuda:{args.rank}' if args.distributed else 'cuda')
     else:
         device = torch.device('cpu')
-    args_obj.device = device  # 确保传递给数据集和攻击代理的 args 包含正确的设备信息
-
-    # 获取数据转换
+    args_obj.device = device
     train_transform, val_transform = get_transforms(args_obj.dataset)
     
-    # 同步所有进程，确保数据加载器创建前所有进程都准备好
+
     if args.distributed:
         dist.barrier()
     
-    # 获取数据加载器
+
     train_val_loader, val_loader, val_poisoned_loader = get_dataloaders(args_obj, val_transform)
     
-    # 加载 / 复用主干网络
+
     if has_in_memory_backbone:
         backbone = args.eval_backbone.to(device)
     else:
         backbone = get_backbone_model(args_obj.arch, model_path, device, args_obj.dataset)
     
-    # 不要对没有需要梯度的backbone使用DDP
+
     if eval_distributed and dist.is_initialized():
-        # 检查模型是否有需要梯度的参数
+
         has_grad_params = any(p.requires_grad for p in backbone.parameters())
         if has_grad_params:
             backbone = torch.nn.parallel.DistributedDataParallel(backbone, device_ids=[args.rank], find_unused_parameters=True)
         else:
-            print(f"注意: backbone没有需要梯度的参数，不使用DistributedDataParallel包装 (rank {args.rank})")
+            print(f"Note: backbone has no trainable parameters, skip DistributedDataParallel wrapping (rank {args.rank})")
     
-    # 提取特征统计
+
     train_feats, _ = get_feats(
         train_val_loader,
         backbone,
@@ -728,12 +652,12 @@ def test_model(model_path, epoch, args, logger=None, config=None):
         world_size=args_obj.world_size,
     )
     
-    # 计算训练特征的方差和均值
+
     train_var, train_mean = torch.var_mean(train_feats, dim=0)
     
-    # 创建线性分类器
+
     arch = args_obj.arch if 'moco_' not in args_obj.arch else args_obj.arch.replace('moco_', '')
-    # 根据数据集名称获取类别数量
+
     if args_obj.dataset in dataset_params and 'num_classes' in dataset_params[args_obj.dataset]:
         nb_classes = dataset_params[args_obj.dataset]['num_classes']
     else:
@@ -746,13 +670,13 @@ def test_model(model_path, epoch, args, logger=None, config=None):
         nn.Linear(train_feats.shape[1], nb_classes),
     ).to(device)
     
-    # 同步所有进程，确保所有进程都创建了线性分类器
+
     if eval_distributed and dist.is_initialized():
         dist.barrier()
-        print(f"同步所有进程，确保都创建了线性分类器, rank: {args.rank}")
+        print(f"Synchronizing all processes to ensure a linear classifier is created on every rank, rank: {args.rank}")
         
     if eval_distributed and dist.is_initialized():
-        # 检查模型是否有需要梯度的参数
+
         has_grad_params = any(p.requires_grad for p in linear.parameters())
         if has_grad_params:
             try:            
@@ -762,11 +686,11 @@ def test_model(model_path, epoch, args, logger=None, config=None):
                     find_unused_parameters=True
                 )
             except Exception as e:
-                print(f"DDP包装失败: {e}，继续使用非DDP模型，rank: {args.rank}")
+                print(f"DDP wrapping failed: {e}, continue with non-DDP model, rank: {args.rank}")
         else:
-            print(f"注意: linear分类器没有需要梯度的参数，不使用DistributedDataParallel包装，rank: {args.rank}")
+            print(f"Note: linear classifier has no trainable parameters, skip DistributedDataParallel wrapping, rank: {args.rank}")
     
-    # 设置优化器和学习率调度器
+
     optimizer = torch.optim.SGD(linear.parameters(), args_obj.lr,
                                 momentum=args_obj.momentum,
                                 weight_decay=args_obj.weight_decay)
@@ -775,68 +699,67 @@ def test_model(model_path, epoch, args, logger=None, config=None):
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=sched)
     
 
-    # 训练线性分类器
     best_acc1 = 0.0
     best_linear_state = None
     
     for e in range(args_obj.epochs):
         print(f"Linear eval epoch {e+1}/{args_obj.epochs}")
         
-        # 训练一个epoch
+
         train_linear_classifier(train_val_loader, backbone, linear, optimizer, e, args_obj)
         
-        # 验证
+
         acc1 = validate(val_loader, backbone, linear, args_obj)
         
-        # 更新学习率
+
         lr_scheduler.step()
         
-        # 只在rank 0保存最佳模型
+
         is_best = acc1 > best_acc1
         if is_best:
             best_acc1 = acc1
             best_linear_state = linear.state_dict()
     
-    # 将最佳模型从rank 0广播到所有进程
+
     if args.distributed:
-        # 同步所有进程
+
         dist.barrier()
         
-        # 如果当前进程是rank 0，则广播最佳线性分类器状态
+
         if args.rank == 0:
-            # 首先创建一个包含状态字典的列表，用于广播
+
             state_list = [best_linear_state]
         else:
-            # 其他进程创建一个空列表，用于接收状态字典
+
             state_list = [None]
         
-        # 广播状态字典
+
         dist.broadcast_object_list(state_list, src=0)
         
-        # 更新非rank 0进程的最佳线性分类器状态
+
         if args.rank != 0:
             best_linear_state = state_list[0]
         
-        # 再次同步所有进程
+
         dist.barrier()
     
-    # 加载最佳模型权重
+
     linear.load_state_dict(best_linear_state)
     
-    # 最终评估
+
     clean_acc, _, clean_conf_matrix = validate_with_conf_matrix(val_loader, backbone, linear, args_obj)
     poison_acc, _, poison_conf_matrix = validate_with_conf_matrix(val_poisoned_loader, backbone, linear, args_obj)
     
-    # 计算攻击成功率 (Attack Success Rate)
-    assert args_obj.attack_target is not None, "攻击目标未指定"
+
+    assert args_obj.attack_target is not None, "Attack target is not specified"
     attack_target = args_obj.attack_target
     
-    # 在毒化样本中计算攻击成功率
+
     non_target_total = 0
     non_target_success = 0
     
     for i in range(poison_conf_matrix.shape[0]):
-        if i != attack_target:  # 排除本身就是目标类的样本
+        if i != attack_target:
             class_samples = np.sum(poison_conf_matrix[i, :])
             if class_samples > 0:
                 non_target_total += class_samples
@@ -850,9 +773,8 @@ def test_model(model_path, epoch, args, logger=None, config=None):
         print(f"Clean Confusion Matrix:\n{np.array2string(clean_conf_matrix, precision=0)}")
         print(f"Poison Confusion Matrix:\n{np.array2string(poison_conf_matrix, precision=0)}")
 
-        # 只在主进程(rank 0)上记录日志和生成可视化
         if logger and (args.rank == 0 or not args.distributed):
-            # 记录基本指标
+
             log_step = getattr(args, 'current_global_step', epoch)
             logger.log({
                 "eval/clean_acc": clean_acc,
@@ -860,29 +782,24 @@ def test_model(model_path, epoch, args, logger=None, config=None):
                 "eval/attack_success_rate": asr
             }, step=log_step)
             
-            # 创建混淆矩阵的可视化并记录（仅在主进程上执行）
+
             try:
                 try:
                     import matplotlib
-                    # 使用非交互式后端，避免多进程问题
+
                     matplotlib.use('Agg')
                     import matplotlib.pyplot as plt
                 except ImportError as import_err:
                     raise
                 import io
                 from PIL import Image
-                import gc  # 用于垃圾回收
-                
-                
-                # 准备类别名称
+                import gc
                 class_names = [str(i) for i in range(clean_conf_matrix.shape[0])]
                 num_classes = clean_conf_matrix.shape[0]
                 
-                # 根据类别数量动态调整图片大小和DPI，减少内存使用
-                fig_size = min(12, max(8, num_classes * 0.3))  # 限制最大尺寸
-                dpi = min(150, max(80, 80 + num_classes))  # 降低DPI减少内存
-                
-                # 记录干净数据集的混淆矩阵
+
+                fig_size = min(12, max(8, num_classes * 0.3))
+                dpi = min(150, max(80, 80 + num_classes))
                 plt.figure(figsize=(fig_size, fig_size), dpi=dpi)
                 plt.imshow(clean_conf_matrix, cmap='Blues')
                 plt.colorbar()
@@ -890,30 +807,30 @@ def test_model(model_path, epoch, args, logger=None, config=None):
                 plt.ylabel('True')
                 plt.title(f'Clean Confusion Matrix (Epoch {epoch})')
                 
-                # 如果类别较多，可能需要调整标签字体大小
+
                 if num_classes > 20:
                     plt.xticks(fontsize=6)
                     plt.yticks(fontsize=6)
-                elif num_classes <= 30:  # 类别不太多时显示刻度
+                elif num_classes <= 30:
                     plt.xticks(range(num_classes), class_names, fontsize=8)
                     plt.yticks(range(num_classes), class_names, fontsize=8)
                 
-                # 将图像保存到内存缓冲区
+
                 clean_buf = io.BytesIO()
                 plt.savefig(clean_buf, format='png', bbox_inches='tight', dpi=dpi)
                 clean_buf.seek(0)
                 
-                # 创建PIL图像对象
+
                 clean_img = Image.open(clean_buf)
                 clean_np_img = np.array(clean_img)
                 
-                # 清理资源
+
                 plt.close()
                 plt.clf()
                 clean_buf.close()
                 clean_img.close()
                 
-                # 记录毒化数据集的混淆矩阵
+
                 plt.figure(figsize=(fig_size, fig_size), dpi=dpi)
                 plt.imshow(poison_conf_matrix, cmap='Reds')
                 plt.colorbar()
@@ -924,37 +841,34 @@ def test_model(model_path, epoch, args, logger=None, config=None):
                 if num_classes > 20:
                     plt.xticks(fontsize=6)
                     plt.yticks(fontsize=6)
-                elif num_classes <= 30:  # 类别不太多时显示刻度
+                elif num_classes <= 30:
                     plt.xticks(range(num_classes), class_names, fontsize=8)
                     plt.yticks(range(num_classes), class_names, fontsize=8)
                 
-                # 将图像保存到内存缓冲区
+
                 poison_buf = io.BytesIO()
                 plt.savefig(poison_buf, format='png', bbox_inches='tight', dpi=dpi)
                 poison_buf.seek(0)
                 
-                # 创建PIL图像对象
+
                 poison_img = Image.open(poison_buf)
                 poison_np_img = np.array(poison_img)
                 
-                # 清理资源
+
                 plt.close()
                 plt.clf()
                 poison_buf.close()
                 poison_img.close()
                 
-                # 使用Logger类的标准接口添加图像
-                
-                # 兼容直接传递 wandb module 或 wandb run 对象
+
                 if logger is not None:
                     try:
-                        # 尝试记录图像
+
                         logger.log({
                             'eval/clean_confusion_matrix': wandb.Image(clean_np_img),
                             'eval/poison_confusion_matrix': wandb.Image(poison_np_img)
                         }, step=log_step)
 
-                        # 使用wandb原生表格格式记录混淆矩阵
                         clean_table = wandb.Table(
                             columns=["True/Pred"] + class_names,
                             data=[[class_names[i]] + [float(x) for x in clean_conf_matrix[i].tolist()] for i in range(len(class_names))]
@@ -964,7 +878,6 @@ def test_model(model_path, epoch, args, logger=None, config=None):
                             data=[[class_names[i]] + [float(x) for x in poison_conf_matrix[i].tolist()] for i in range(len(class_names))]
                         )
 
-                        # 合并为一次log，避免wandb对同一step的多次日志合并造成表格显示异常
                         logger.log({
                             "eval/clean_confusion_matrix_table": clean_table,
                             "eval/poison_confusion_matrix_table": poison_table
@@ -973,7 +886,7 @@ def test_model(model_path, epoch, args, logger=None, config=None):
                     except Exception as e:
                         pass
                 
-                # 强制垃圾回收，释放内存
+
                 del clean_np_img, poison_np_img
                 gc.collect()
                 
@@ -981,7 +894,7 @@ def test_model(model_path, epoch, args, logger=None, config=None):
                 import traceback
                 traceback.print_exc()
         
-        # 如果是分布式训练，尽量同步，但默认跳过全员 barrier 以避免卡死
+
         if args.distributed:
             enable_test_barrier = os.environ.get('ENABLE_TEST_BARRIER', '0') == '1'
             if enable_test_barrier:
@@ -992,12 +905,9 @@ def test_model(model_path, epoch, args, logger=None, config=None):
 
     return clean_acc, poison_acc, asr
 
-# === 在文件顶部导入区域之后，添加数据集到类别数的映射 ===
-# 数据集到类别数量的映射，便于后续统一引用
 DATASET_NUM_CLASSES = {
     'imagenet100': 100,
     'imagenet': 1000,
     'cifar10': 10,
     'stl10': 10,
 }
-

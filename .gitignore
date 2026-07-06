@@ -22,9 +22,8 @@ configs/poisoning/ablation/**
 configs/poisoning/poisoning_based_copy/**
 configs/poisoning/optimization_based/**
 projects/
-scripts_old/
-projects/
-
+CLAUDE.md
+check_before_commit.md
 
 # trash
 .trash/

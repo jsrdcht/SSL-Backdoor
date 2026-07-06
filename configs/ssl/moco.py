@@ -1,9 +1,9 @@
 #!/usr/bin/env python
-# MoCo默认配置文件
+# MoCo default config.
 
-# 基本配置
+# Base config
 config = {
-    # 通用参数
+    # Common settings
     'method': 'moco',
     'arch': 'resnet18',
     'workers': 4,
@@ -23,10 +23,10 @@ config = {
     'multiprocessing_distributed': True,
     'feature_dim': 128,
     
-    # 攻击相关参数
+    # Attack-related settings
     'ablation': False,
 
-    # MoCo特定参数
+    # MoCo-specific hyperparameters
     'moco_k': 65536,
     'moco_m': 0.999,
     'moco_contr_w': 1,
@@ -36,21 +36,21 @@ config = {
     'moco_unif_w': 0,
     'moco_unif_t': 3,
 
-    # # 数据集配置
+    # # Dataset config
     # 'dataset': 'imagenet-100',
-    # 'data': '/workspace/SSL-Backdoor/data/ImageNet-100/trainset.txt',
+    # 'data': 'data/ImageNet-100/trainset.txt',
     
-    # 混合精度训练
+    # Mixed-precision training
     'amp': True,
     
-    # 实验记录
+    # Experiment logging
     'experiment_id': 'moco_imagenet-100_test',
     'save_folder_root': '',
     'save_freq': 30,
     
-    # 日志配置
+    # Logger options
     'logger_type': 'wandb',  # 'tensorboard', 'wandb', 'none'
     
-    # 攻击目标类别（如果需要）
+    # Attack target classes, when needed
     'attack_target_list': [0]
 }

@@ -20,7 +20,7 @@ def attr_exists(args, x):
     return hasattr(args, x) and getattr(args, x) is not None
 
 def load_image(image, mode='RGBA'):
-    """加载并转换图像模式"""
+    """."""
     if isinstance(image, str):
         return Image.open(image).convert(mode)
     elif isinstance(image, Image.Image):
@@ -32,35 +32,32 @@ def load_image(image, mode='RGBA'):
 
 def add_watermark(input_image, watermark, watermark_width=50, position='random', location_min=0.25, location_max=0.75, alpha_composite=True, alpha=0.0, return_location=False, mode='patch'):
     """
-    在图像上添加水印，支持两种模式：'patch' 和 'blend'
+        
     
-    参数:
-        input_image: 输入图像路径或PIL图像对象
-        watermark: 水印图像路径或PIL图像对象
-        watermark_width: 水印宽度（像素，仅patch模式使用）
-        position: 水印位置，支持'random'和'badnet'(右下角偏移-1像素)
-        location_min: 随机位置的最小比例范围
-        location_max: 随机位置的最大比例范围
-        alpha_composite: 是否使用alpha混合
-        alpha: 混合的透明度
-        return_location: 是否返回水印位置
-        mode: 水印添加模式，'patch'（局部贴片）或'blend'（全局混合）
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
     
-    统一语义（重要）:
-        alpha 的含义在所有模式中保持一致：
-        - alpha = 0.0: 完全保留原图
-        - alpha = 1.0: 水印在应用区域内完全覆盖原图
+        
+        
+        
+        
 
-    返回:
-        添加水印后的图像，若 return_location 为 True，则同时返回位置信息
+        
+        
     """
     if position == 'badencoder':
-        raise RuntimeError("参数 'badencoder' 已经过时并被取消，请使用 'badnet' 代替。")
-
-    # 如果是 Refool 模式，委托给 add_refool_backdoor
+        raise RuntimeError("Parameter 'badencoder' is deprecated and removed; use 'badnet' instead.")
     if isinstance(mode, str) and mode.lower().startswith('refool'):
         variant = 'ghost' if 'ghost' in mode.lower() else 'smooth'
-        # 注意：Refool 分支不返回位置信息，即使 return_location=True 也与 blend 分支行为一致
         return add_refool_backdoor(input_image, watermark, variant=variant, alpha=alpha)
 
     img_watermark = load_image(watermark, mode='RGBA')
@@ -71,10 +68,7 @@ def add_watermark(input_image, watermark, watermark_width=50, position='random',
         base_image = input_image.convert('RGBA')
     else:
         raise ValueError("Invalid input_image argument")
-
-    # 根据模式选择不同的水印添加方法
     if mode == 'blend':
-        # 全图线性混合：alpha=1 -> 完全使用水印像素；alpha=0 -> 完全使用原图
         img_watermark = img_watermark.resize(base_image.size)
         try:
             a = float(alpha)
@@ -105,7 +99,6 @@ def add_watermark(input_image, watermark, watermark_width=50, position='random',
 
             location = (random.randint(loc_min_w, loc_max_w), random.randint(loc_min_h, loc_max_h))
         elif position == 'badnet':
-            # 右下角位置偏移-1像素
             location = (width - w_width - 1, height - w_height - 1)
         else:
             logging.info("Invalid position argument")
@@ -116,24 +109,15 @@ def add_watermark(input_image, watermark, watermark_width=50, position='random',
         except Exception:
             a = 0.0
         a = max(0.0, min(1.0, a))
-
-        # 基图转 RGBA 且保证完全不透明（避免底图自身 alpha 干扰线性语义）
         base_rgba = base_image.convert('RGBA')
         if base_rgba.getbands()[-1] != 'A':
             base_rgba.putalpha(255)
         else:
-            # 强制将底图 alpha 设为 255，确保公式等价
             base_rgba.putalpha(Image.new('L', base_rgba.size, 255))
-
-        # 构造仅贴片区域有内容的 overlay
         overlay = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         wm_rgba = img_watermark.convert('RGBA')
-
-        # 修复逻辑：不再使用 uniform_alpha 覆盖原始 alpha 通道，
-        # 而是将原始 alpha 通道与全局透明度 a 相乘，从而保留触发器自身的形状/透明度信息。
         if 'A' in wm_rgba.getbands():
             r, g, b, alpha_channel = wm_rgba.split()
-            # 将原始 alpha 通道与全局 a 混合
             new_alpha = alpha_channel.point(lambda p: int(p * a))
             wm_rgba = Image.merge('RGBA', (r, g, b, new_alpha))
         else:
@@ -167,7 +151,6 @@ class ReferenceObjectDataset(Dataset):
         def list_subdirectories(path_to_dir):
             return [d for d in os.listdir(path_to_dir) if os.path.isdir(os.path.join(path_to_dir, d))]
         subdirs = list_subdirectories(path_to_dir)
-        # 遍历子文件夹，收集图像和标签路径
         for subdir in subdirs:
             img_path = os.path.join(path_to_dir, subdir, 'img.png')
             label_path = os.path.join(path_to_dir, subdir, 'label.png')
@@ -178,21 +161,11 @@ class ReferenceObjectDataset(Dataset):
         img_path, label_path = self.data[idx]
         img = Image.open(img_path).convert('RGB')
         label = Image.open(label_path).convert('L')
-
-        # 将标签图像转换为numpy数组
         label_np = np.array(label)
-        
-        # 创建前景掩码
         mask = label_np > 0
-        
-        # 将原始图像转换为numpy数组
         img_np = np.array(img)
-        
-        # 应用掩码
         foreground = img_np * mask[:, :, None]
         background = img_np * (~mask[:, :, None])
-
-        # 转换为PIL图像
         foreground_img = Image.fromarray(foreground.astype(np.uint8))
         background_img = Image.fromarray(background.astype(np.uint8))
         whole_img = Image.fromarray(img_np.astype(np.uint8))
@@ -226,23 +199,14 @@ class Trigger_Dataset(torch.utils.data.Dataset):
         return self.dataset_length
 
     def __getitem__(self, idx):
-        # 创建一个黑色的背景图像
         background = Image.new('RGB', self.img_size, (0, 0, 0))
-        
-        # 调整 trigger_img 的大小
         resized_trigger = self.trigger_img.resize(self.trigger_size)
-        
-        # 计算可以放置触发图像的中心点的范围
         max_x = int(self.img_size[0] * 0.75) - self.trigger_size[0] // 2
         min_x = int(self.img_size[0] * 0.25) + self.trigger_size[0] // 2
         max_y = int(self.img_size[1] * 0.75) - self.trigger_size[1] // 2
         min_y = int(self.img_size[1] * 0.25) + self.trigger_size[1] // 2
-        
-        # 随机选择中心点
         center_x = random.randint(min_x, max_x)
         center_y = random.randint(min_y, max_y)
-        
-        # 粘贴到背景图像
         background.paste(resized_trigger, (center_x - self.trigger_size[0] // 2, center_y - self.trigger_size[1] // 2))
         
         if self.transform:
@@ -261,8 +225,6 @@ def concatenate_images(img1, img2):
     Returns:
     PIL.Image: The concatenated image.
     """
-
-    # 1) 面积对齐：若两图面积相差超过 2 倍，则将较小者按面积等比放大
     area1 = img1.width * img1.height
     area2 = img2.width * img2.height
     if max(area1, area2) > 2 * min(area1, area2):
@@ -272,12 +234,8 @@ def concatenate_images(img1, img2):
         else:
             s = (area1 / area2) ** 0.5
             img2 = img2.resize((int(img2.width * s), int(img2.height * s)), resample=Image.Resampling.LANCZOS)
-
-    # 2) 随机选择拼接方向与顺序：0=上, 1=右, 2=下, 3=左
     choice = random.randint(0, 3)
     vertical = choice in (0, 2)
-
-    # 3) 将需要对齐的维度对齐（保持与原实现一致：仅改变对齐维度，会产生非等比缩放）
     if vertical:
         target_w = min(img1.width, img2.width)
         img1 = img1.resize((target_w, img1.height), resample=Image.Resampling.LANCZOS)
@@ -290,8 +248,6 @@ def concatenate_images(img1, img2):
         img2 = img2.resize((img2.width, target_h), resample=Image.Resampling.LANCZOS)
         canvas_size = (img1.width + img2.width, target_h)
         pos_a, pos_b = ((0, 0), (img1.width, 0)) if choice == 1 else ((img2.width, 0), (0, 0))
-
-    # 4) 生成画布并粘贴
     result = Image.new('RGB', canvas_size)
     result.paste(img1, pos_a)
     result.paste(img2, pos_b)
@@ -301,16 +257,16 @@ def concatenate_images(img1, img2):
 
 def add_refool_backdoor(input_image, reflection_image, variant='ghost', alpha=0.2, max_image_size=None, offset=None, ghost_alpha=None, sigma=None):
     """
-    将 Refool 反射后门叠加到图片上。
+        
 
-    参数:
-        input_image: 原图，str 路径或 PIL.Image
-        reflection_image: 反射图，str 路径或 PIL.Image
-        variant: 'ghost' 或 'smooth'
-        alpha: 反射强度 (0~1)，越大反射越强
-        max_image_size: 若指定，控制内部计算的最大边；不指定则使用原图尺寸
+        
+        
+        
+        
+        
+        
 
-    返回:
+        
         PIL.Image (RGB)
     """
     base_image = load_image(input_image, mode='RGB')
@@ -326,9 +282,6 @@ def add_refool_backdoor(input_image, reflection_image, variant='ghost', alpha=0.
         t = cv2.resize(t, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
         h, w = t.shape[:2]
     r = cv2.resize(r, (w, h), interpolation=cv2.INTER_CUBIC)
-
-    # alpha 语义与 add_watermark 对齐：alpha 越大，反射越强
-    # 当 alpha 无效（None 或超出 [0,1]）时，按 Refool 策略随机化 alpha_t
     if alpha is None or (isinstance(alpha, (int, float)) and (alpha < 0.0 or alpha > 1.0)):
         alpha_t = 1.0 - float(np.random.uniform(0.05, 0.45))
     else:
@@ -377,8 +330,6 @@ def add_refool_backdoor(input_image, reflection_image, variant='ghost', alpha=0.
         r_1 = np.pad(r_g, ((0, offset_y), (0, offset_x), (0, 0)), mode='constant', constant_values=0)
         r_2 = np.pad(r_g, ((offset_y, 0), (offset_x, 0), (0, 0)), mode='constant', constant_values=0)
         ghost_r_full = r_1 * ghost_alpha_v + r_2 * (1.0 - ghost_alpha_v)
-
-        # 确保裁剪区域有效；若图像过小或偏移过大，则回退为不裁剪的 ghost（直接使用 r_g）
         inner_h = h - 2 * offset_y
         inner_w = w - 2 * offset_x
         if inner_h <= 0 or inner_w <= 0:
@@ -389,7 +340,6 @@ def add_refool_backdoor(input_image, reflection_image, variant='ghost', alpha=0.
 
         reflection_mask = ghost_r * (1.0 - alpha_t)
         blended_g = reflection_mask + t_g * alpha_t
-        # 数值安全性：裁剪到非负并去除 NaN/Inf
         blended_g = np.clip(blended_g, 0.0, 1.0)
         blended_g = np.nan_to_num(blended_g, nan=0.0, posinf=1.0, neginf=0.0)
 
@@ -426,7 +376,6 @@ def add_refool_backdoor(input_image, reflection_image, variant='ghost', alpha=0.
 
         r_blur_mask = r_blur * alpha_r
         blend_g = r_blur_mask + t_g * alpha_t
-        # 数值安全性：裁剪到 [0,1] 并去除 NaN/Inf
         blend_g = np.clip(blend_g, 0.0, 1.0)
         blend_g = np.nan_to_num(blend_g, nan=0.0, posinf=1.0, neginf=0.0)
 

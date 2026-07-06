@@ -1,13 +1,13 @@
-# 获取脚本所在的目录
+# Get the directory containing this script
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
-# 获取项目根目录 (tools目录的上级目录)
+# Set project root to the parent directory of tools/
 PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
 
-# 将项目根目录添加到 PYTHONPATH
+# Add project root to PYTHONPATH
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
-# 现在可以执行 Python 脚本了，它能找到 ssl_trainers
-# 假设你的 python 命令是这样调用的
+# The Python process can now resolve ssl_trainers modules.
+# Typical launch pattern is as shown below.
 CUDA_VISIBLE_DEVICES=3 python "${SCRIPT_DIR}/run_patchsearch.py" \
     --config configs/defense/patchsearch.py \
     --attack_config configs/poisoning/poisoning_based/sslbkd.yaml

@@ -1,8 +1,4 @@
-"""
-PatchSearch防御方法的主接口。
-
-PatchSearch是一种用于检测自监督学习模型中后门的防御方法，它通过特征聚类和补丁搜索来识别具有后门触发器的样本。
-"""
+"""PatchSearch utility implementation."""
 
 import os
 import numpy as np
@@ -40,69 +36,29 @@ def run_patchsearch(
     topk_thresholds=None,
     experiment_id='defense_run'
 ):
-    """
-    运行PatchSearch防御方法
-    
-    参数:
-        args: 一些不是必须的参数，比如poison_label。
-        model: 预训练模型，如果为None，则从weights_path加载
-        weights_path: 模型权重路径
-        train_file: 训练文件路径（包含图像路径和标签的文本文件）
-        suspicious_dataset: 可疑数据集，如果为None，则从train_file加载
-        dataset_name: 数据集名称，支持'imagenet100', 'cifar10', 'stl10'
-        output_dir: 输出目录
-        arch: 模型架构
-        num_clusters: 聚类数量
-        test_images_size: 测试图像数量
-        window_w: 窗口大小
-        repeat_patch: 重复补丁数量
-        samples_per_iteration: 每次迭代的样本数量
-        remove_per_iteration: 每次迭代移除的聚类比例
-        prune_clusters: 是否剪枝聚类
-        batch_size: 批处理大小
-        num_workers: 工作进程数量
-        topk_thresholds: top-k阈值列表
-        experiment_id: 实验ID，用于创建输出目录
-        
-    返回:
-        result_dict: 包含检测结果的字典，具有以下键:
-            - poison_scores: 每个样本的毒性得分
-            - sorted_indices: 按毒性得分排序的样本索引
-            - is_poison: 标记每个样本是否有毒的布尔数组
-            - topk_accuracy: 在不同k值下的检测准确率
-            - output_dir: 结果保存的目录
-    """
-    # 参数验证
+    """PatchSearch utility implementation."""
     if model is None and weights_path is None:
-        raise ValueError("必须提供model或weights_path之一")
+        raise ValueError("Either model or weights_path must be provided")
     
     if suspicious_dataset is None and train_file is None:
-        raise ValueError("必须提供suspicious_dataset或train_file之一")
-    
-    # 设置输出目录
+        raise ValueError("Either suspicious_dataset or train_file must be provided")
     experiment_dir = os.path.join(output_dir, experiment_id)
     os.makedirs(experiment_dir, exist_ok=True)
-    
-    # 加载模型
     if model is None:
-        print(f"从权重加载模型: {weights_path}")
+        print(f"Loading model from weights: {weights_path}")
 
         model = get_backbone_model(arch, weights_path, device='cpu', dataset=dataset_name, freeze_backbone=True)
         model.eval()
     else:
         model.eval()
-    
-    # 准备数据集
     if suspicious_dataset is None:
-        print(f"从文件加载数据集: {train_file}, 数据集名称: {dataset_name}, 图像大小: 224 x 224")
+        print(f"Loading dataset from file: {train_file}, dataset name: {dataset_name}, image size: 224 x 224")
         image_size = 224
         transform = get_transforms(dataset_name, image_size)
         
-        print(f"从文件加载数据集: {train_file}")
-        print("默认认为路径名称带有poison的是毒物")
+        print(f"Loading dataset from file: {train_file}")
+        print("Poison samples are assumed when filename contains "poison"")
         suspicious_dataset = FileListDataset(train_file, transform, poison_label='poison')
-    
-    # 准备数据加载器
     loader = DataLoader(
         suspicious_dataset,
         shuffle=False,
@@ -110,9 +66,7 @@ def run_patchsearch(
         num_workers=num_workers,
         pin_memory=True
     )
-    
-    # 运行检测
-    print("开始运行PatchSearch检测...")
+    print("Starting PatchSearch detection...")
     poison_scores, sorted_inds, is_poison = patchsearch_iterative(
         model=model,
         train_val_loader=loader,
@@ -130,8 +84,6 @@ def run_patchsearch(
         prune_clusters=prune_clusters,
         topk_thresholds=topk_thresholds
     )
-    
-    # 计算topk准确率
     if topk_thresholds is None:
         topk_thresholds = [5, 10, 20, 50, 100, 500]
     
@@ -146,8 +98,6 @@ def run_patchsearch(
         auroc = roc_auc_score(is_poison, poison_scores)
     except ValueError:
         auroc = 0.0
-    
-    # 保存结果
     result_dict = {
         "poison_scores": poison_scores,
         "sorted_indices": sorted_inds,
@@ -156,16 +106,13 @@ def run_patchsearch(
         "auroc": auroc,
         "output_dir": experiment_dir
     }
-    
-    # 打印结果
-    print("\n检测结果:")
-    print(f"结果保存在: {experiment_dir}")
+    print("
+Detection results:")
+    print(f"Saved results to: {experiment_dir}")
     print(f"AUROC: {auroc*100:.2f}%")
-    print("在不同k值下的检测准确率:")
+    print("Top-k detection accuracy across k values:")
     for k, acc in topk_accuracy.items():
         print(f"Top-{k}: {acc:.2f}%")
-    
-    # 保存排序后的样本索引，以便后续使用
     np.save(os.path.join(experiment_dir, 'sorted_indices.npy'), sorted_inds)
     
     return result_dict 
@@ -192,38 +139,12 @@ def run_patchsearch_filter(
     seed=42,
     external_test_loader=None
 ):
-    """
-    运行PatchSearch的第二阶段：训练一个分类器来过滤可能的后门样本
-    
-    参数:
-        poison_scores: 毒性分数数组，如果为None，则从poison_scores_path加载
-        poison_scores_path: 毒性分数文件路径
-        output_dir: 输出目录，如果为None，则使用poison_scores_path的目录
-        train_file: 训练文件路径
-        poison_dir: 包含顶部毒药补丁的目录，如果为None，则使用output_dir/all_top_poison_patches
-        dataset_name: 数据集名称
-        topk_poisons: 用于训练分类器的顶部毒药数量
-        top_p: 用于训练的数据百分比
-        model_count: 集成模型的数量
-        max_iterations: 最大迭代次数
-        batch_size: 批处理大小
-        num_workers: 工作进程数量
-        lr: 学习率
-        momentum: 动量
-        weight_decay: 权重衰减
-        print_freq: 打印频率
-        eval_freq: 评估频率
-        seed: 随机种子
-        
-    返回:
-        filtered_file_path: 过滤后的干净数据集文件路径
-    """
-    # 参数验证
+    """PatchSearch utility implementation."""
     if poison_scores is None and poison_scores_path is None:
-        raise ValueError("必须提供poison_scores或poison_scores_path之一")
+        raise ValueError("Either poison_scores or poison_scores_path must be provided")
     
     if poison_scores is None:
-        print(f"从文件加载毒性分数: {poison_scores_path}")
+        print(f"Loading poison scores from file: {poison_scores_path}")
         poison_scores = np.load(poison_scores_path)
     
     if output_dir is None and poison_scores_path is not None:
@@ -233,10 +154,8 @@ def run_patchsearch_filter(
         poison_dir = os.path.join(output_dir, 'all_top_poison_patches')
     
     if not os.path.exists(poison_dir):
-        raise ValueError(f"毒药补丁目录不存在: {poison_dir}")
-    
-    # 运行毒药分类器
-    print(f"开始运行PatchSearch毒药分类器...")
+        raise ValueError(f"Poison patch directory not found: {poison_dir}")
+    print(f"Starting PatchSearch poison patch classifier...")
     filtered_file_path = run_poison_classifier(
         poison_scores=poison_scores,
         output_dir=output_dir,
@@ -258,6 +177,6 @@ def run_patchsearch_filter(
         external_test_loader=external_test_loader
     )
     
-    print(f"过滤后的数据集已保存到: {filtered_file_path}")
+    print(f"Filtered dataset saved to: {filtered_file_path}")
     
     return filtered_file_path 
