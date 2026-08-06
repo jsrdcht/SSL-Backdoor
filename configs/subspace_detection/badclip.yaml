@@ -1,0 +1,46 @@
+experiment_id: clip_vit_b16_badclip
+output_dir: results/defense/subspace_detection
+seed: 42
+device: cuda:0
+target_class: banana
+prediction_template: "a photo of a {}"
+
+model:
+  type: huggingface
+  name: clip-vit-base-patch16
+  checkpoint: null  # Set this to the poisoned CLIP checkpoint.
+  dataset: imagenet
+
+resources:
+  descriptions: assets/subspace_detection_resources/imagenet1k_descriptions.csv
+  arabic_classes: assets/subspace_detection_resources/imagenet1k_arabic_classes.txt
+
+data:
+  labels_csv: assets/subspace_detection_resources/imagenet1k_val_labels.csv
+  image_root: data/imagenet-1k/val
+  start_index: 0
+  reference_samples: 200
+  num_samples: 1000
+
+trigger:
+  attack_algorithm: badclip
+  trigger_path: assets/bdetclip/badCLIP.jpg
+  trigger_size: 50
+  pre_resize: 224
+  position: random
+  location_min: 0.0
+  location_max: 0.9955357142857143
+  alpha: 1.0
+
+detector:
+  variance_ratio: 0.95
+  num_components: 3
+  num_augmented: 90
+  num_detection_samples: 15
+  eta: 0.001
+  cosine_ratio: [0.85, 1.0]
+
+runtime:
+  batch_size: 64
+  text_batch_size: 256
+  workers: 4

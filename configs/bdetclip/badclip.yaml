@@ -1,0 +1,40 @@
+experiment_id: clip_vit_b16_badclip
+output_dir: results/defense/bdetclip
+seed: 42
+device: cuda:0
+target_class: banana
+prediction_template: "a photo of a {}"
+
+model:
+  type: huggingface
+  name: clip-vit-base-patch16
+  checkpoint: null  # Set this to the poisoned CLIP checkpoint.
+  dataset: imagenet
+
+resources:
+  classes: assets/imagenet/classes.py
+  benign_prompts: assets/bdetclip/Benign_Imagenet1k.json
+  malignant_prompts: assets/bdetclip/Malignant_Imagenet1k.txt
+
+data:
+  labels_csv: assets/subspace_detection_resources/imagenet1k_val_labels.csv
+  image_root: data/imagenet-1k/val
+  reference_samples: 200
+  evaluation_samples: 1000
+  poison_ratio: 0.3
+
+trigger:
+  attack_algorithm: badclip
+  trigger_path: assets/bdetclip/badCLIP.jpg
+  trigger_size: 50
+  pre_resize: 224
+  position: random
+  location_min: 0.0
+  location_max: 0.9955357142857143
+  alpha: 1.0
+  trigger_interpolation: bicubic
+
+runtime:
+  batch_size: 64
+  text_batch_size: 256
+  workers: 4

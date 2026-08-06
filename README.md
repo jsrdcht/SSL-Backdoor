@@ -2,7 +2,12 @@
 
 **A unified PyTorch library for backdoor attacks & defenses in self-supervised learning**
 
-`MIT License` · `Python 3.10` · `PyTorch 2.2–2.4` · `CUDA 12.1`
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE.txt)
+[![Python 3.10](https://img.shields.io/badge/Python-3.10-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![PyTorch 2.2–2.4](https://img.shields.io/badge/PyTorch-2.2--2.4-EE4C2C.svg?style=flat-square&logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![CUDA 12.1](https://img.shields.io/badge/CUDA-12.1-76B900.svg?style=flat-square&logo=nvidia&logoColor=white)](https://developer.nvidia.com/cuda-toolkit)
+[![Implemented Methods](https://img.shields.io/badge/Implemented-8%20Attacks%20%7C%206%20Defenses-8A2BE2.svg?style=flat-square)](#supported-attacks)
+[![GitHub Stars](https://img.shields.io/github/stars/jsrdcht/SSL-Backdoor?style=flat-square&logo=github)](https://github.com/jsrdcht/SSL-Backdoor/stargazers)
 
 ---
 
@@ -10,6 +15,7 @@ SSL-Backdoor is an academic research library for **backdoor attacks in self-supe
 
 ## 📢 News
 
+- **2026-08-06** 🎉 **BDetCLIP ([ICML 2025](https://arxiv.org/abs/2405.15269))** and **Subspace Detection ([ICLR 2026](https://openreview.net/forum?id=Kpij6oOnJl))** test-time defenses are now available!
 - **2026-07-07** 🎉 **BadCLIP** attack is now available! Dual-embedding guided backdoor attack on multimodal contrastive learning ([CVPR 2024](https://arxiv.org/abs/2311.12075)).
 - **2026-07-07** 🎉 **CLIP-Backdoor** attack is now available! Poisoning-based backdoor attacks on CLIP, based on Carlini et al. ([ICLR 2022](https://openreview.net/forum?id=iC4UHbQ01Mp)).
 
@@ -53,6 +59,8 @@ We are actively developing and integrating defense mechanisms. Currently, the fo
 | SSL-Cleanse | [SSL-Cleanse: Trojan detection and mitigation in self-supervised learning](https://link.springer.com/chapter/10.1007/978-3-031-73021-4_24)                                                                                                 | ECCV 2024 | [config](configs/defense/ssl_cleanse.py)                                      |
 | DEDE        | [DeDe: Detecting Backdoor Samples for SSL Encoders via Decoders](http://arxiv.org/abs/2411.16154)                                                                                                                                          | CVPR 2025 | –                                                                             |
 | Decomp      | [A Closer Look at Backdoor Attacks on CLIP](https://openreview.net/forum?id=DWCDyGl6k8)                                                                                                                                                    | ICML 2025 | [config](configs/defense/decomp.yaml)                                         |
+| BDetCLIP    | [Test-Time Multimodal Backdoor Detection by Contrastive Prompting](https://arxiv.org/abs/2405.15269)                                                                                                                                       | ICML 2025 | [doc](ssl_backdoor/defenses/bdetclip/README.md) · [configs](configs/bdetclip) |
+| Subspace Detection | [Test-Time Poisoned Sample Detection by Exploiting Shallow Malicious Matching in Backdoored CLIP](https://openreview.net/forum?id=Kpij6oOnJl)                                                                                           | ICLR 2026 | [doc](ssl_backdoor/defenses/subspace_detection/README.md) · [configs](configs/subspace_detection) |
 
 
 
@@ -106,4 +114,3 @@ bash tools/train.sh <path_to_your_config.yaml>
   note         = {MIT License, accessed 2025-08-11}
 }
 ```
-
