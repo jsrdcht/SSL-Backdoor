@@ -6,7 +6,7 @@
 [![Python 3.10](https://img.shields.io/badge/Python-3.10-3776AB.svg?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch 2.2–2.4](https://img.shields.io/badge/PyTorch-2.2--2.4-EE4C2C.svg?style=flat-square&logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![CUDA 12.1](https://img.shields.io/badge/CUDA-12.1-76B900.svg?style=flat-square&logo=nvidia&logoColor=white)](https://developer.nvidia.com/cuda-toolkit)
-[![Implemented Methods](https://img.shields.io/badge/Implemented-8%20Attacks%20%7C%206%20Defenses-8A2BE2.svg?style=flat-square)](#supported-attacks)
+[![Implemented Methods](https://img.shields.io/badge/Implemented-8%20Attacks%20%7C%205%20Defenses-8A2BE2.svg?style=flat-square)](#supported-attacks)
 [![GitHub Stars](https://img.shields.io/github/stars/jsrdcht/SSL-Backdoor?style=flat-square&logo=github)](https://github.com/jsrdcht/SSL-Backdoor/stargazers)
 
 ---
@@ -22,7 +22,6 @@ SSL-Backdoor is an academic research library for **backdoor attacks in self-supe
 **Previous updates**
 
 - **2026-02-02** **Decomp** defense is now available! ([ICML 2025](https://openreview.net/forum?id=DWCDyGl6k8))
-- **2025-12-02** **SSL-Cleanse** defense is now available! ([ECCV 2024](https://link.springer.com/chapter/10.1007/978-3-031-73021-4_24))
 - **2025-08-11** **DRUPE** attack is now available! ([S&P 2024](https://www.computer.org/csdl/proceedings-article/sp/2024/313000a029/1RjEa5rjsHK))
 - **2025-05-19** **DEDE** defense is now available!
 - **2025-04-18** **PatchSearch** defense and **BadEncoder** attack are now available!
@@ -56,7 +55,6 @@ We are actively developing and integrating defense mechanisms. Currently, the fo
 | Method      | Paper                                                                                                                                                                                                                                      | Venue     | Configs                                                                       |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- | ----------------------------------------------------------------------------- |
 | PatchSearch | [Defending Against Patch-Based Backdoor Attacks on Self-Supervised Learning](https://openaccess.thecvf.com/content/CVPR2023/html/Tejankar_Defending_Against_Patch-Based_Backdoor_Attacks_on_Self-Supervised_Learning_CVPR_2023_paper.html) | CVPR 2023 | [doc](./docs/zh_cn/patchsearch.md) · [config](configs/defense/patchsearch.py) |
-| SSL-Cleanse | [SSL-Cleanse: Trojan detection and mitigation in self-supervised learning](https://link.springer.com/chapter/10.1007/978-3-031-73021-4_24)                                                                                                 | ECCV 2024 | [config](configs/defense/ssl_cleanse.py)                                      |
 | DEDE        | [DeDe: Detecting Backdoor Samples for SSL Encoders via Decoders](http://arxiv.org/abs/2411.16154)                                                                                                                                          | CVPR 2025 | –                                                                             |
 | Decomp      | [A Closer Look at Backdoor Attacks on CLIP](https://openreview.net/forum?id=DWCDyGl6k8)                                                                                                                                                    | ICML 2025 | [config](configs/defense/decomp.yaml)                                         |
 | BDetCLIP    | [Test-Time Multimodal Backdoor Detection by Contrastive Prompting](https://arxiv.org/abs/2405.15269)                                                                                                                                       | ICML 2025 | [doc](ssl_backdoor/defenses/bdetclip/README.md) · [configs](configs/bdetclip) |
