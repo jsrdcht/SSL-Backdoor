@@ -24,7 +24,9 @@ from ssl_backdoor.datasets import dataset_params
 from ssl_backdoor.utils.utils import interpolate_pos_embed
 
 class Normalize(nn.Module):
-    """English utility documentation."""    def forward(self, x):
+    """Normalize feature vectors along the channel dimension."""
+
+    def forward(self, x):
         return F.normalize(x, p=2, dim=1)
 
 class FullBatchNorm(nn.Module):
@@ -61,7 +63,8 @@ def load_model_weights(model, wts_path: str) -> Dict[str, Any]:
     raise ValueError(f'Could not find model weights in {wts_path}')
 
 def get_backbone_model(arch, wts_path, device, dataset='imagenet100'):
-    """English utility documentation."""    from ssl_backdoor.utils.model_utils import get_backbone_model
+    """Load the requested backbone through the shared model utility."""
+    from ssl_backdoor.utils.model_utils import get_backbone_model
     
     return get_backbone_model(arch, wts_path, device, dataset)
 
@@ -316,7 +319,8 @@ def get_feats(loader, model, distributed: bool = False, rank: int = 0, world_siz
     return feats, labels
 
 def train_linear_classifier(train_loader, backbone, linear, optimizer, epoch, args):
-    """English utility documentation."""    batch_time = AverageMeter('Time', ':6.3f')
+    """Train the downstream linear classifier for one epoch."""
+    batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
@@ -395,7 +399,8 @@ def train_linear_classifier(train_loader, backbone, linear, optimizer, epoch, ar
     return top1.avg
 
 def validate(val_loader, backbone, linear, args):
-    """English utility documentation."""    batch_time = AverageMeter('Time', ':6.3f')
+    """Evaluate top-k accuracy on a validation loader."""
+    batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
     top5 = AverageMeter('Acc@5', ':6.2f')
@@ -467,7 +472,8 @@ def validate(val_loader, backbone, linear, args):
     return top1.avg
 
 def validate_with_conf_matrix(val_loader, backbone, linear, args):
-    """English utility documentation."""    batch_time = AverageMeter('Time', ':6.3f')
+    """Evaluate top-k accuracy and return a confusion matrix."""
+    batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
     top5 = AverageMeter('Acc@5', ':6.2f')
@@ -573,6 +579,8 @@ def test_model(model_path, epoch, args, logger=None, config=None):
         'trigger_size': _get_param('trigger_size'),
         'trigger_insert': _get_param('trigger_insert'),
         'attack_algorithm': _get_param('attack_algorithm'),
+        'pre_resize': _get_param('pre_resize', False),
+        'pre_resize_size': _get_param('pre_resize_size'),
 
         'external_service_url': _get_param('external_service_url'),
         'service_url': _get_param('service_url'),

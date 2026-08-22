@@ -9,6 +9,7 @@ import random
 from PIL import Image
 
 from ssl_backdoor.datasets.attacker.triggers import apply_static_trigger
+from ssl_backdoor.datasets.pre_resize import pre_resize_image, resolve_pre_resize
 from .caption_targets import build_target_caption, load_templates
 from .utils import (build_trigger_args, read_image_caption_csv, resolve_image_path,
                     resolve_image_root, write_csv)
@@ -51,6 +52,7 @@ def _sample_indices(rows, cfg, caption_key):
 
 def generate_poison(cfg):
     """Execute poison generation, return generated poisoned CSV path."""
+    pre_resize, pre_resize_size = resolve_pre_resize(cfg)
     image_key = cfg.get("image_key", "image")
     caption_key = cfg.get("caption_key", "caption")
     delimiter = cfg.get("delimiter", ",")
@@ -66,9 +68,6 @@ def generate_poison(cfg):
 
     trigger_args = build_trigger_args(cfg["trigger"])
     trigger_path = cfg["trigger"].get("trigger_path")
-    # pre_resize: resize image to this resolution (square) before applying trigger. BadCLIP triggers optimized
-    # in 224 space, must be deployed at same scale, otherwise processor scaling will blur patch. Default None keeps original behavior.
-    pre_resize = cfg["trigger"].get("pre_resize")
     templates = load_templates(cfg.get("caption_templates"), cfg.get("num_templates"), cfg.get("seed", 42))
     rng = random.Random(cfg.get("seed", 42))
     label_consistent = cfg.get("label_consistent", False)
@@ -78,8 +77,7 @@ def generate_poison(cfg):
         rel_path = rows[i][image_key]
         try:
             image = Image.open(resolve_image_path(rel_path, src_root)).convert("RGB")
-            if pre_resize:
-                image = image.resize((pre_resize, pre_resize))
+            image = pre_resize_image(image, pre_resize, pre_resize_size)
             image = apply_static_trigger(image, trigger_args, trigger=trigger_path)
         except Exception as e:
             skipped += 1

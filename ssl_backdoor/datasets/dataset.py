@@ -10,6 +10,7 @@ import torch.distributed as dist
 
 from typing import List
 from collections import defaultdict
+from collections.abc import Mapping
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageColor
 from sklearn.datasets import make_classification
 from abc import abstractmethod
@@ -18,13 +19,18 @@ from torch.utils import data
 
 from .attacker.corruptencoder_utils import *
 from .attacker.agent import CTRLPoisoningAgent, AdaptivePoisoningAgent, ExternalServicePoisoningAgent
-from .utils import concatenate_images, attr_exists, attr_is_true, load_image, add_watermark, split_resize_transforms
+from .utils import concatenate_images, attr_exists, attr_is_true, load_image, add_watermark
 
 from .base import TriggerBasedPoisonedTrainDataset
+from .pre_resize import pre_resize_image
 from .var import dataset_params
-RESAMPLE_BILINEAR = getattr(Image, 'BILINEAR', 2)
 
-    
+
+def _config_value(config, name, default=None):
+    if isinstance(config, Mapping):
+        return config.get(name, default)
+    return getattr(config, name, default)
+
 
 class FileListDataset(data.Dataset):
     def __init__(self, args, path_to_txt_file, transform=None):
@@ -33,12 +39,15 @@ class FileListDataset(data.Dataset):
             self.file_list = [row.rstrip() for row in f.readlines()]
 
         self.transform = transform
+        self.pre_resize = _config_value(args, 'pre_resize', False)
+        self.pre_resize_size = _config_value(args, 'pre_resize_size', None)
 
     def __getitem__(self, idx):
         image_path = self.file_list[idx].split()[0]
         img = Image.open(image_path).convert('RGB')
         target = int(self.file_list[idx].split()[1])
 
+        img = pre_resize_image(img, self.pre_resize, self.pre_resize_size)
         if self.transform is not None:
             img = self.transform(img)
 
@@ -62,6 +71,7 @@ class CTRLTrainDataset(TriggerBasedPoisonedTrainDataset):
         if isinstance(image, str):
             image = Image.open(image).convert('RGB')
 
+        image = self._pre_resize_image(image)
         return self.agent.apply_poison(image)
     
     def generate_poisoned_data(self, poison_info: 'list[dict]') -> List[str]:
@@ -231,6 +241,9 @@ class SSLBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
 
         
     def apply_poison(self, image, trigger):
+        if isinstance(image, str):
+            image = Image.open(image).convert('RGB')
+        image = self._pre_resize_image(image)
         triggered_img = add_watermark(image, trigger, watermark_width=self.trigger_size,
                                     position=self.position,
                                     location_min=self.location_min,
@@ -262,7 +275,6 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
 
         self.args = args
         self.transform = transform
-        self.resize_transform, self.other_transform = split_resize_transforms(transform)
         self.return_attack_target = getattr(self.args, 'return_attack_target', False)
         self.attack_target = self.args.attack_target
         self.img_size = dataset_params[self.args.dataset]['image_size']
@@ -300,12 +312,6 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
 
     def apply_poison(self, img):
         """."""
-        if getattr(self, 'pre_resize', False) and self.pre_resize_size is not None:
-            if isinstance(self.pre_resize_size, (list, tuple)):
-                img = img.resize(tuple(self.pre_resize_size), RESAMPLE_BILINEAR)
-            else:
-                img = img.resize((self.pre_resize_size, self.pre_resize_size), RESAMPLE_BILINEAR)
-
         if hasattr(self, 'agent'):
             return self.agent.apply_poison(img)
         elif self.attack_algorithm == 'clean':
@@ -336,6 +342,7 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
             for idx in range(len(self.file_list)):
                 image_path = self.file_list[idx].split()[0]
                 img = Image.open(image_path).convert('RGB')
+                img = pre_resize_image(img, self.pre_resize, self.pre_resize_size)
                 img = self.apply_poison(img)
                 if isinstance(img, tuple):
                     img, _ = img
@@ -351,14 +358,14 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         image_path = self.file_list[idx].split()[0]
         img = Image.open(image_path).convert('RGB')
         target = int(self.file_list[idx].split()[1]) if not self.return_attack_target else self.attack_target
-        if self.resize_transform is not None:
-            img = self.resize_transform(img)
-        if not self.pre_inject_mode and idx in self.poison_idxs:
-            img = self.apply_poison(img)
-            if isinstance(img, tuple):
-                img, _ = img
-        if self.other_transform is not None:
-            img = self.other_transform(img)
+        if not self.pre_inject_mode:
+            img = pre_resize_image(img, self.pre_resize, self.pre_resize_size)
+            if idx in self.poison_idxs:
+                img = self.apply_poison(img)
+                if isinstance(img, tuple):
+                    img, _ = img
+        if self.transform is not None:
+            img = self.transform(img)
 
         if bool(getattr(self, 'rich_output', False)):
             return {'img_path': image_path, 'img': img, 'target': target, 'idx': idx}
@@ -367,9 +374,6 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
 
     def __len__(self):
         return len(self.file_list)
-    
-
-
 
 
 

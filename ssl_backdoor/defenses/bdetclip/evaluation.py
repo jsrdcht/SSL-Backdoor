@@ -19,6 +19,7 @@ from sklearn.metrics import (
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from ssl_backdoor.datasets.pre_resize import resolve_pre_resize
 from ssl_backdoor.defenses.subspace_detection.data import ImageSampleDataset, read_samples
 from ssl_backdoor.defenses.subspace_detection.modeling import (
     HuggingFaceVisionLanguageEncoder,
@@ -124,6 +125,7 @@ def _target_index(target, classes):
 
 
 def run_bdetclip(config: dict, model=None, processor=None) -> dict:
+    pre_resize, pre_resize_size = resolve_pre_resize(config)
     seed = int(config.get("seed", 42))
     set_seed(seed)
     device = torch.device(config.get("device", "cuda") if torch.cuda.is_available() else "cpu")
@@ -148,13 +150,23 @@ def run_bdetclip(config: dict, model=None, processor=None) -> dict:
         target=target,
         seed=seed,
     )
+    resize_args = {"pre_resize": pre_resize, "pre_resize_size": pre_resize_size}
     reference_features = _encode_reference(
-        _loader(ImageSampleDataset(reference, encoder.process_image), runtime), encoder
+        _loader(
+            ImageSampleDataset(reference, encoder.process_image, **resize_args),
+            runtime,
+        ),
+        encoder,
     )
     features, labels, paths, poisoned = _encode_evaluation(
         _loader(
             MixedTriggeredDataset(
-                evaluation, poisoned_indices, encoder.process_image, config["trigger"], seed
+                evaluation,
+                poisoned_indices,
+                encoder.process_image,
+                config["trigger"],
+                seed,
+                **resize_args,
             ),
             runtime,
         ),

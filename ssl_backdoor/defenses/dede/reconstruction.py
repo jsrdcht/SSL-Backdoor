@@ -308,7 +308,7 @@ def main():
     
     print("Loading clean test dataset...")
     clean_test_dataset = FileListDataset(
-        args=None,
+        args=test_config_obj,
         path_to_txt_file=test_config_obj.test_file,
         transform=transform
     )
@@ -336,4 +336,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()

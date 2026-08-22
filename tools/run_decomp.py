@@ -6,6 +6,7 @@ import torch
 from torch.utils.data import DataLoader
 from ssl_backdoor.utils.model_utils import load_model
 from ssl_backdoor.datasets.dataset import FileListDataset, OnlineUniversalPoisonedValDataset
+from ssl_backdoor.datasets.pre_resize import resolve_pre_resize
 from ssl_backdoor.defenses.decomp.decomp_defense import extract_prs_features, run_image_detection_and_ablation, get_zero_shot_classifier, calculate_detection_metrics
 from ssl_backdoor.defenses.decomp.utils import get_classes_and_templates
 import torchvision.transforms as transforms
@@ -31,7 +32,7 @@ def main():
             raise FileNotFoundError(f"poison_config not found: {args.poison_config}")
         print(f"Loading poison config from {args.poison_config}")
         with open(args.poison_config, 'r') as f:
-            poison_config = yaml.safe_load(f)
+            poison_config = yaml.safe_load(f) or {}
         
     # Read required settings from config
     reference_file = config.get('reference_file')
@@ -123,13 +124,32 @@ def main():
         for idx in val_indices:
             f.write(full_filelist[idx] + '\n')
 
+    pre_resize, pre_resize_size = resolve_pre_resize(poison_config)
+    poison_args = argparse.Namespace(
+        dataset=poison_config.get('dataset', dataset_name),
+        attack_algorithm=poison_config.get('attack_algorithm', 'badclip' if trigger_path else 'clean'),
+        trigger_path=trigger_path,
+        trigger_size=poison_config.get('trigger_size', config.get('trigger_size', 16)),
+        location_min=poison_config.get('location_min', config.get('location_min', 0.15)),
+        location_max=poison_config.get('location_max', config.get('location_max', 0.85)),
+        trigger_insert=poison_config.get('trigger_insert', config.get('trigger_insert', 'patch')),
+        position=poison_config.get('position', config.get('position', 'random')),
+        alpha=poison_config.get('alpha', config.get('alpha', 0.2)),
+        attack_target=poison_config.get('attack_target', config.get('target_label', 0)),
+        mode=poison_config.get('mode', config.get('mode', 'ours_tnature')),
+        return_attack_target=poison_config.get('return_attack_target', False),
+        pre_resize=pre_resize,
+        pre_resize_size=pre_resize_size,
+        device=device,
+    )
+
     # Load Reference Dataset (Clean Prototypes)
     print("Loading clean reference dataset...")
-    ref_dataset = FileListDataset(None, ref_filelist_path, transform=transform)
+    ref_dataset = FileListDataset(poison_args, ref_filelist_path, transform=transform)
     
     # Load Clean Validation Dataset
     print("Loading clean validation dataset...")
-    clean_val_dataset = FileListDataset(None, val_filelist_path, transform=transform)
+    clean_val_dataset = FileListDataset(poison_args, val_filelist_path, transform=transform)
     
     ref_loader = DataLoader(ref_dataset, batch_size=config.get('batch_size', 32), shuffle=False, num_workers=config.get('num_workers', 4))
     clean_val_loader = DataLoader(clean_val_dataset, batch_size=config.get('batch_size', 32), shuffle=False, num_workers=config.get('num_workers', 4))
@@ -146,30 +166,6 @@ def main():
     
     # Load Poisoned Dataset
     print("Loading poisoned dataset...")
-    # OnlineUniversalPoisonedValDataset requires args object with specific attributes
-    # We construct a mock args object
-    class MockArgs:
-        def __init__(self, **kwargs):
-            self.__dict__.update(kwargs)
-            
-    poison_args = MockArgs(
-        dataset=poison_config.get('dataset', dataset_name),
-        attack_algorithm=poison_config.get('attack_algorithm', 'badclip' if trigger_path else 'clean'), 
-        trigger_path=trigger_path,
-        trigger_size=poison_config.get('trigger_size', config.get('trigger_size', 16)),
-        location_min=poison_config.get('location_min', config.get('location_min', 0.15)),
-        location_max=poison_config.get('location_max', config.get('location_max', 0.85)),
-        trigger_insert=poison_config.get('trigger_insert', config.get('trigger_insert', 'patch')),
-        position=poison_config.get('position', config.get('position', 'random')),
-        alpha=poison_config.get('alpha', config.get('alpha', 0.2)),
-        attack_target=poison_config.get('attack_target', config.get('target_label', 0)),
-        mode=poison_config.get('mode', config.get('mode', 'ours_tnature')),
-        return_attack_target=poison_config.get('return_attack_target', False),
-        pre_resize=poison_config.get('pre_resize', False),
-        pre_resize_size=poison_config.get('pre_resize_size', None),
-        device=device
-    )
-    
     # Use the validation split for poisoning evaluation
     # This ensures we don't evaluate on the samples used for prototypes, and we use the same validation set as the clean evaluation
     poisoned_dataset = OnlineUniversalPoisonedValDataset(poison_args, val_filelist_path, transform=transform)

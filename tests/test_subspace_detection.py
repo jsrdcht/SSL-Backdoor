@@ -5,6 +5,10 @@ import torch
 from PIL import Image
 
 from ssl_backdoor.defenses.image_trigger import apply_static_trigger
+from ssl_backdoor.defenses.subspace_detection.data import (
+    ImageSampleDataset,
+    PairedTriggeredDataset,
+)
 from ssl_backdoor.defenses.subspace_detection.detector import SubspaceDetector
 from ssl_backdoor.defenses.subspace_detection.text_variants import TextVariantBank
 
@@ -65,3 +69,32 @@ def test_static_trigger_supports_wanet_through_compatibility_import():
     image = Image.new("RGB", (8, 8))
     result = apply_static_trigger(image, {"attack_algorithm": "wanet"})
     assert result.size == image.size
+
+
+def test_subspace_datasets_share_pre_resize(tmp_path, monkeypatch):
+    image_path = tmp_path / "image.png"
+    Image.new("RGB", (12, 8)).save(image_path)
+    samples = [(image_path, 2)]
+    trigger_sizes = []
+
+    def record_trigger(image, *_args, **_kwargs):
+        trigger_sizes.append(image.size)
+        return image
+
+    monkeypatch.setattr(
+        "ssl_backdoor.defenses.subspace_detection.data.apply_static_trigger",
+        record_trigger,
+    )
+    resize_args = {"pre_resize": True, "pre_resize_size": [7, 5]}
+    reference = ImageSampleDataset(samples, lambda image: image.size, **resize_args)
+    paired = PairedTriggeredDataset(
+        samples,
+        lambda image: image.size,
+        {},
+        seed=3,
+        **resize_args,
+    )
+
+    assert reference[0][0] == (7, 5)
+    assert paired[0][:3] == ((7, 5), (7, 5), 2)
+    assert trigger_sizes == [(7, 5)]
