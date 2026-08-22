@@ -44,14 +44,8 @@ _TRIGGER_KEYS = (
 
 
 def build_trigger_args(trigger_cfg):
-    """Convert trigger section from poison/eval config to args dict expected by apply_static_trigger.
-
-    ``trigger_insert`` and ``attack_algorithm`` are aliases (following poisoning config convention);
-    here normalized to ``attack_algorithm``, other fields passed through as-is, defaults from trigger_templates.
-    """
+    """Build trigger arguments while preserving the configured selector."""
     args = {k: trigger_cfg[k] for k in _TRIGGER_KEYS if k in trigger_cfg}
-    algo = trigger_cfg.get("attack_algorithm") or trigger_cfg.get("trigger_insert")
-    if not algo:
+    if not (trigger_cfg.get("attack_algorithm") or trigger_cfg.get("trigger_insert")):
         raise ValueError("trigger config must provide attack_algorithm or trigger_insert")
-    args["attack_algorithm"] = algo
     return args

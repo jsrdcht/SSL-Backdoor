@@ -2,8 +2,10 @@ import os
 import numpy as np
 import torch
 import warnings
+from collections.abc import Mapping
 
 from .generators import GeneratorResnet
+from .trigger_templates import trigger_defaults
 
 from scipy.fftpack import dct, idct
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageColor
@@ -12,15 +14,21 @@ import zipfile
 import requests
 
 
+def _get_arg(args, name, default=None):
+    value = args.get(name) if isinstance(args, Mapping) else getattr(args, name, None)
+    return default if value is None else value
+
+
 class CTRLPoisoningAgent():
     def __init__(self, args):
+        defaults = trigger_defaults("ctrl")
         self.args = args
-        self.channel_list = [1, 2]
-        self.window_size = getattr(args, 'window_size', 32)
-        self.pos_list = [(15, 15), (31, 31)]
-        self.magnitude = getattr(args, 'attack_magnitude', 50)  # although the default value is 50 in CTRL paper, it is recommended to use 100 in their github repo
+        self.channel_list = list(_get_arg(args, 'channel_list', defaults['channel_list']))
+        self.window_size = _get_arg(args, 'window_size', defaults['window_size'])
+        self.pos_list = [tuple(pos) for pos in _get_arg(args, 'pos_list', defaults['pos_list'])]
+        self.magnitude = _get_arg(args, 'attack_magnitude', defaults['attack_magnitude'])
 
-        self.lindct = False
+        self.lindct = _get_arg(args, 'lindct', defaults['lindct'])
 
     def apply_poison(self, img):
         assert isinstance(img, Image.Image), "Input must be a PIL image"
@@ -126,14 +134,16 @@ class CTRLPoisoningAgent():
 
 class AdaptivePoisoningAgent():
     def __init__(self, args):
+        defaults = trigger_defaults("blto")
         self.args = args
-        self.device = args.device
-        if not getattr(args, 'generator_path', None):
+        self.device = _get_arg(args, 'device', defaults['device'])
+        generator_path = _get_arg(args, 'generator_path', defaults['generator_path'])
+        if not generator_path:
             raise ValueError("AdaptivePoisoningAgent requires args.generator_path to be set")
-        if not os.path.exists(args.generator_path):
-            raise FileNotFoundError(f"AdaptivePoisoningAgent generator_path not found: {args.generator_path}")
+        if not os.path.exists(generator_path):
+            raise FileNotFoundError(f"AdaptivePoisoningAgent generator_path not found: {generator_path}")
         self.net_G = GeneratorResnet().to(self.device)
-        self.net_G.load_state_dict(torch.load(args.generator_path, map_location='cpu')["state_dict"], strict=True)
+        self.net_G.load_state_dict(torch.load(generator_path, map_location='cpu')["state_dict"], strict=True)
 
     @torch.no_grad()
     def apply_generatorG(self, netG, img, eps=8/255, eval_G=True):
@@ -152,7 +162,7 @@ class AdaptivePoisoningAgent():
         if isinstance(image, str):
             image = Image.open(image).convert('RGB')
 
-        if 'imagenet' in self.args.dataset.lower():
+        if 'imagenet' in str(_get_arg(self.args, 'dataset', '')).lower():
             image = image.resize((224, 224))
 
         # to tensor

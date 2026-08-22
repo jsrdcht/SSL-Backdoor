@@ -11,7 +11,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from ssl_backdoor.defenses.image_trigger import apply_static_trigger
+from ssl_backdoor.datasets.attacker.triggers import apply_static_trigger
 
 
 class ImagePathResolver:

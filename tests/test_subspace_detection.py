@@ -61,6 +61,7 @@ def test_static_patch_trigger_and_alias(tmp_path):
     assert result.getpixel((0, 0)) == (0, 0, 0)
 
 
-def test_static_trigger_rejects_unsupported_online_attack():
-    with pytest.raises(ValueError, match="poisoned_csv"):
-        apply_static_trigger(Image.new("RGB", (8, 8)), {"attack_algorithm": "wanet"})
+def test_static_trigger_supports_wanet_through_compatibility_import():
+    image = Image.new("RGB", (8, 8))
+    result = apply_static_trigger(image, {"attack_algorithm": "wanet"})
+    assert result.size == image.size
