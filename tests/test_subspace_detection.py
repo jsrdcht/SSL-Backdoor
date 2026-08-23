@@ -46,12 +46,12 @@ def test_text_resources_are_aligned():
     assert all(bank.texts(954))
 
 
-def test_static_patch_trigger_and_alias(tmp_path):
+def test_static_patch_trigger(tmp_path):
     trigger_path = tmp_path / "trigger.png"
     Image.new("RGB", (2, 2), "white").save(trigger_path)
     image = Image.new("RGB", (8, 8), "black")
     config = {
-        "attack_algorithm": "sslbkd",
+        "trigger_insert": "patch",
         "trigger_path": str(trigger_path),
         "trigger_size": 2,
         "position": "badnet",
@@ -67,7 +67,7 @@ def test_static_patch_trigger_and_alias(tmp_path):
 
 def test_static_trigger_supports_wanet_through_compatibility_import():
     image = Image.new("RGB", (8, 8))
-    result = apply_static_trigger(image, {"attack_algorithm": "wanet"})
+    result = apply_static_trigger(image, {"trigger_insert": "wanet"})
     assert result.size == image.size
 
 
@@ -90,7 +90,7 @@ def test_subspace_datasets_share_pre_resize(tmp_path, monkeypatch):
     paired = PairedTriggeredDataset(
         samples,
         lambda image: image.size,
-        {},
+        {"trigger_insert": "patch", "trigger_path": "unused.png"},
         seed=3,
         **resize_args,
     )

@@ -1,4 +1,5 @@
 import torch
+import pytest
 from PIL import Image
 
 from ssl_backdoor.attacks.clip_backdoor import poison_generator, zeroshot_eval
@@ -36,8 +37,7 @@ def test_zero_shot_clean_and_backdoor_share_pre_resize(tmp_path, monkeypatch):
     clean = zeroshot_eval._ZeroShotDataset(**common)
     backdoor = zeroshot_eval._ZeroShotDataset(
         **common,
-        trigger_args={"trigger_insert": "patch"},
-        trigger_path="unused.png",
+        trigger_args={"trigger_insert": "patch", "trigger_path": "unused.png"},
     )
 
     clean[0]
@@ -59,17 +59,49 @@ def test_poison_generator_resizes_before_trigger(tmp_path, monkeypatch):
         return image
 
     monkeypatch.setattr(poison_generator, "apply_static_trigger", record_trigger)
-    poison_generator.generate_poison(
+    poisoned_csv = poison_generator.generate_poison(
         {
             "train_csv": str(train_csv),
             "output_dir": str(tmp_path / "output"),
+            "attack_algorithm": "sslbkd",
             "attack_target": "banana",
             "num_poison": 1,
             "seed": 42,
             "pre_resize": True,
             "pre_resize_size": [7, 5],
-            "trigger": {"trigger_insert": "patch", "trigger_size": 2},
+            "trigger": {
+                "trigger_insert": "patch",
+                "trigger_path": "unused.png",
+                "trigger_size": 2,
+            },
         }
     )
 
     assert trigger_sizes == [(7, 5)]
+    assert poisoned_csv.endswith("backdoor_banana_sslbkd_2_all_1.csv")
+
+
+def test_clip_pipelines_validate_trigger_before_side_effects(tmp_path, monkeypatch):
+    output_dir = tmp_path / "output"
+    invalid_trigger = {
+        "attack_algorithm": "sslbkd",
+        "trigger_path": "trigger.png",
+    }
+
+    with pytest.raises(ValueError, match="trigger_insert"):
+        poison_generator.generate_poison(
+            {
+                "trigger": invalid_trigger,
+                "output_dir": str(output_dir),
+                "attack_algorithm": "sslbkd",
+            }
+        )
+    assert not output_dir.exists()
+
+    monkeypatch.setattr(
+        zeroshot_eval,
+        "_load_model",
+        lambda *_args, **_kwargs: pytest.fail("model loading must not run"),
+    )
+    with pytest.raises(ValueError, match="trigger_insert"):
+        zeroshot_eval.evaluate({"trigger": invalid_trigger})

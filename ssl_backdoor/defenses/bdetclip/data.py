@@ -10,6 +10,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 
 from ssl_backdoor.datasets.attacker.triggers import apply_static_trigger
+from ssl_backdoor.datasets.attacker.trigger_templates import validate_trigger_config
 from ssl_backdoor.datasets.pre_resize import pre_resize_image
 
 
@@ -45,7 +46,9 @@ class MixedTriggeredDataset(Dataset):
         self.samples = list(samples)
         self.poisoned_indices = set(poisoned_indices)
         self.process_image = process_image
-        self.trigger = trigger
+        self.trigger = dict(trigger)
+        self.trigger.pop("trigger_interpolation", None)
+        validate_trigger_config(self.trigger, require_path=True)
         self.seed = seed
         self.pre_resize = pre_resize
         self.pre_resize_size = pre_resize_size

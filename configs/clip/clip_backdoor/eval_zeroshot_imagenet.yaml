@@ -23,7 +23,7 @@ num_eval_templates: null
 
 # Trigger section must match the poisoning generation config to ensure ASR measures the same backdoor
 trigger:
-  attack_algorithm: sslbkd
+  trigger_insert: patch
   trigger_path: ${PROJECT_ROOT}/assets/triggers/trigger_14.png
   trigger_size: 50
   position: random

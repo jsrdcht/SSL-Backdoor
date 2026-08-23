@@ -17,7 +17,7 @@ from .utils import (build_trigger_args, read_image_caption_csv, resolve_image_pa
 
 def _prepare_name(cfg, start, end):
     """Follow CleanCLIP prepare_path_name's readable naming: algorithm/target/size/poison_count."""
-    algo = cfg["trigger"].get("attack_algorithm") or cfg["trigger"].get("trigger_insert")
+    algo = cfg["attack_algorithm"]
     parts = [start, str(cfg["attack_target"]), str(algo), str(cfg["trigger"].get("trigger_size", "na")),
              str(cfg.get("size_train_data") or "all"), str(cfg["num_poison"])]
     if cfg.get("label_consistent"):
@@ -52,6 +52,9 @@ def _sample_indices(rows, cfg, caption_key):
 
 def generate_poison(cfg):
     """Execute poison generation, return generated poisoned CSV path."""
+    if not cfg.get("attack_algorithm"):
+        raise ValueError("poison config must provide top-level attack_algorithm")
+    trigger_args = build_trigger_args(cfg["trigger"])
     pre_resize, pre_resize_size = resolve_pre_resize(cfg)
     image_key = cfg.get("image_key", "image")
     caption_key = cfg.get("caption_key", "caption")
@@ -66,8 +69,6 @@ def generate_poison(cfg):
 
     backdoor_idx, clean_idx = _sample_indices(rows, cfg, caption_key)
 
-    trigger_args = build_trigger_args(cfg["trigger"])
-    trigger_path = cfg["trigger"].get("trigger_path")
     templates = load_templates(cfg.get("caption_templates"), cfg.get("num_templates"), cfg.get("seed", 42))
     rng = random.Random(cfg.get("seed", 42))
     label_consistent = cfg.get("label_consistent", False)
@@ -78,7 +79,7 @@ def generate_poison(cfg):
         try:
             image = Image.open(resolve_image_path(rel_path, src_root)).convert("RGB")
             image = pre_resize_image(image, pre_resize, pre_resize_size)
-            image = apply_static_trigger(image, trigger_args, trigger=trigger_path)
+            image = apply_static_trigger(image, trigger_args)
         except Exception as e:
             skipped += 1
             print(f"[warn] Skipping poisoned image {rel_path}: {e}")

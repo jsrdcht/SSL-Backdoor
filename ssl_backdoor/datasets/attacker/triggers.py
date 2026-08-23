@@ -1,5 +1,6 @@
 import random
 import copy
+from collections.abc import Mapping, MutableMapping
 from types import SimpleNamespace
 
 import cv2
@@ -9,19 +10,40 @@ from PIL import Image
 
 from ..utils import add_watermark, load_image
 from .agent import AdaptivePoisoningAgent, CTRLPoisoningAgent
-from .trigger_templates import PARAM_ALIASES, TRIGGER_ALIASES, TRIGGER_PARAM_TEMPLATES, trigger_defaults
+from .trigger_templates import (
+    resolve_trigger_name,
+    trigger_defaults,
+    validate_trigger_config,
+)
+
+
+_REJECTED_TRIGGER_FIELDS = {
+    "ctrl": ("lindct",),
+    "refool": (
+        "alpha",
+        "reflection_path",
+        "refool_reflection_path",
+        "refool_ghost_rate",
+        "refool_offset",
+        "refool_sigma",
+        "refool_ghost_alpha",
+    ),
+    "sig": ("sig_amplitude", "sig_freq"),
+    "wanet": ("k", "wanet_s", "s"),
+}
+_REMOVED_TRIGGER_SELECTORS = ("trigger_type", "trigger_mode", "static_trigger")
 
 
 def _get_arg(args, name, default=None):
-    if isinstance(args, dict):
+    if isinstance(args, Mapping):
         return args.get(name, default)
     return getattr(args, name, default)
 
 
 def _set_arg(args, name, value):
-    if isinstance(args, dict):
+    if isinstance(args, MutableMapping):
         args[name] = value
-    else:
+    elif not isinstance(args, Mapping):
         setattr(args, name, value)
 
 
@@ -36,50 +58,64 @@ def _has_value(value):
 def _build_trigger_params(args, trigger_name):
     params = SimpleNamespace(**copy.deepcopy(trigger_defaults(trigger_name)))
     for name in vars(params):
-        for key in (name,) + PARAM_ALIASES.get(name, ()):
-            value = _get_arg(args, key, None)
-            if _has_value(value):
-                setattr(params, name, value)
-                break
+        value = _get_arg(args, name, None)
+        if _has_value(value):
+            setattr(params, name, value)
     return params
 
 
+def _reject_unsupported_trigger_fields(args, trigger_name):
+    fields = [
+        name
+        for name in (
+            *_REMOVED_TRIGGER_SELECTORS,
+            *_REJECTED_TRIGGER_FIELDS.get(trigger_name, ()),
+        )
+        if _has_value(_get_arg(args, name, None))
+    ]
+    if trigger_name == "wanet":
+        has_seed = _has_value(_get_arg(args, "seed", None))
+        has_wanet_seed = _has_value(_get_arg(args, "wanet_seed", None))
+        if has_seed and not has_wanet_seed:
+            fields.append("seed")
+    if fields:
+        raise ValueError(
+            f"Unsupported fields for trigger_insert={trigger_name!r}: {fields}"
+        )
+
+
 def _resolve_trigger_name(args):
-    attack_algorithm = str(_get_arg(args, "attack_algorithm", "")).lower()
-    if attack_algorithm in TRIGGER_PARAM_TEMPLATES and attack_algorithm not in {
-        "patch",
-        "blend",
-    }:
-        return attack_algorithm
+    return resolve_trigger_name(
+        _get_arg(args, "attack_algorithm", None),
+        _get_arg(args, "trigger_insert", None),
+    )
 
-    if attack_algorithm.startswith("refool_") and attack_algorithm in TRIGGER_ALIASES:
-        return attack_algorithm
 
-    for key in ("trigger_insert", "trigger_type", "trigger_mode", "static_trigger", "mode"):
-        value = _get_arg(args, key, None)
-        if isinstance(value, bool):
-            continue
-        if value:
-            trigger_name = str(value).lower()
-            if trigger_name.startswith("refool_") and trigger_name in TRIGGER_ALIASES:
-                return trigger_name
-            return TRIGGER_ALIASES.get(trigger_name, trigger_name)
+def _validate_trigger_args(args, require_path=False):
+    if isinstance(args, Mapping):
+        return validate_trigger_config(
+            args, require_path=require_path, allow_internal=True
+        )
+    trigger_name = _resolve_trigger_name(args)
+    _reject_unsupported_trigger_fields(args, trigger_name)
+    return trigger_name
 
-    if attack_algorithm in TRIGGER_ALIASES:
-        return TRIGGER_ALIASES[attack_algorithm]
-    if attack_algorithm in {"patch", "blend"}:
-        return attack_algorithm
 
-    return "patch"
+def _validate_helper_args(args, expected, require_path=False):
+    trigger_name = _validate_trigger_args(args, require_path)
+    if trigger_name != expected:
+        raise ValueError(
+            f"Expected trigger_insert={expected!r}; got {trigger_name!r}"
+        )
+    return trigger_name
 
 
 def _resolve_trigger_path(args, trigger=None):
     if trigger is not None:
         return trigger
-    for key in ("trigger_path", "reflection_path", "refool_reflection_path"):
-        value = _get_arg(args, key, None)
-        if value:
-            return value
+    value = _get_arg(args, "trigger_path", None)
+    if value:
+        return value
     raise ValueError("trigger_path is required for this trigger")
 
 
@@ -93,29 +129,45 @@ def _cached_agent(args, cache_name, agent_cls):
 
 def apply_static_trigger(img, args, trigger=None):
     """Dispatch a PIL image to a static trigger implementation."""
-    trigger_name = _resolve_trigger_name(args)
-    params = _build_trigger_params(args, trigger_name)
+    trigger_name = _validate_trigger_args(args, require_path=trigger is None)
 
-    if trigger_name in {"patch", "blend"}:
-        return apply_patch_or_blend_trigger(img, args, trigger, trigger_name, params)
-    if trigger_name.startswith("refool"):
-        return apply_refool_trigger(img, args, trigger, trigger_name, params)
     if trigger_name == "ctrl":
-        return _cached_agent(args, "_ctrl_poisoning_agent", CTRLPoisoningAgent).apply_poison(_as_pil(img))
-    if trigger_name == "sig":
-        return apply_sig_trigger(img, args)
-    if trigger_name == "wanet":
-        return apply_wanet_trigger(img, args)
+        return _cached_agent(
+            args, "_ctrl_poisoning_agent", CTRLPoisoningAgent
+        ).apply_poison(_as_pil(img))
     if trigger_name == "blto":
-        return _cached_agent(args, "_blto_poisoning_agent", AdaptivePoisoningAgent).apply_poison(img)
+        return _cached_agent(
+            args, "_blto_poisoning_agent", AdaptivePoisoningAgent
+        ).apply_poison(img)
+
+    params = _build_trigger_params(args, trigger_name)
+    if trigger_name in {"patch", "blend"}:
+        return _apply_patch_or_blend_trigger(
+            img, args, trigger, trigger_name, params
+        )
+    if trigger_name == "refool":
+        return _apply_refool_trigger(img, args, trigger, params)
+    if trigger_name == "sig":
+        return _apply_sig_trigger(img, params)
+    if trigger_name == "wanet":
+        return _apply_wanet_trigger(img, args, params)
 
     raise ValueError(f"Unsupported trigger type: {trigger_name}")
 
 
-def apply_patch_or_blend_trigger(img, args, trigger=None, mode=None, params=None):
-    mode = mode or _resolve_trigger_name(args)
-    if params is None:
-        params = _build_trigger_params(args, mode)
+def apply_patch_or_blend_trigger(img, args, trigger=None):
+    trigger_name = _validate_trigger_args(args, require_path=trigger is None)
+    if trigger_name not in {"patch", "blend"}:
+        raise ValueError(
+            f"Expected trigger_insert='patch' or 'blend'; got {trigger_name!r}"
+        )
+    params = _build_trigger_params(args, trigger_name)
+    return _apply_patch_or_blend_trigger(
+        img, args, trigger, trigger_name, params
+    )
+
+
+def _apply_patch_or_blend_trigger(img, args, trigger, mode, params):
     return add_watermark(
         img,
         _resolve_trigger_path(args, trigger),
@@ -143,31 +195,18 @@ def _to_rgb_array(img):
     return np.asarray(_as_pil(img).convert("RGB"), dtype=np.uint8)
 
 
-def _alpha_t_from_params(params):
-    alpha_t = params.alpha_t
-    if alpha_t is not None:
-        return float(alpha_t)
-
-    alpha = params.alpha
-    if alpha is None:
-        return -1.0
-    return 1.0 - float(alpha)
+def apply_refool_trigger(img, args, trigger=None):
+    _validate_helper_args(args, "refool", require_path=trigger is None)
+    params = _build_trigger_params(args, "refool")
+    return _apply_refool_trigger(img, args, trigger, params)
 
 
-def apply_refool_trigger(img, args, trigger=None, mode=None, params=None):
-    if params is None:
-        params = _build_trigger_params(args, mode or _resolve_trigger_name(args))
+def _apply_refool_trigger(img, args, trigger, params):
     reflection = _resolve_trigger_path(args, trigger)
     img_pil = _as_pil(img).convert("RGB")
     refl_pil = load_image(reflection, mode="RGB")
 
-    mode = (mode or _resolve_trigger_name(args)).lower()
-    if "ghost" in mode:
-        ghost_rate = 1.0
-    elif "smooth" in mode or "blur" in mode:
-        ghost_rate = 0.0
-    else:
-        ghost_rate = float(params.ghost_rate)
+    ghost_rate = float(params.ghost_rate)
 
     max_image_size = params.refool_max_image_size
     if max_image_size is None:
@@ -182,7 +221,7 @@ def apply_refool_trigger(img, args, trigger=None, mode=None, params=None):
         _to_rgb_array(refl_pil),
         max_image_size=int(max_image_size),
         ghost_rate=ghost_rate,
-        alpha_t=_alpha_t_from_params(params),
+        alpha_t=-1.0 if params.alpha_t is None else float(params.alpha_t),
         offset=tuple(offset),
         sigma=float(params.sigma),
         ghost_alpha=float(params.ghost_alpha),
@@ -289,14 +328,24 @@ def _gen_refool_kernel(kern_len=100, nsig=1):
 
 
 def apply_sig_trigger(img, args):
+    _validate_helper_args(args, "sig")
     params = _build_trigger_params(args, "sig")
+    return _apply_sig_trigger(img, params)
+
+
+def _apply_sig_trigger(img, params):
     arr = np.asarray(_as_pil(img).convert("RGB"), dtype=np.float32) / 255.0
     h, w = arr.shape[:2]
     amplitude = float(params.sig_delta)
     if amplitude > 1.0:
         amplitude /= 255.0
     frequency = float(params.sig_frequency)
-    direction = str(params.sig_direction).lower()
+    direction = str(params.sig_direction)
+    if direction not in {"horizontal", "vertical"}:
+        raise ValueError(
+            "sig_direction must be 'horizontal' or 'vertical'; "
+            f"got {direction!r}"
+        )
 
     length = h if direction == "vertical" else w
     axis = np.arange(length, dtype=np.float32)
@@ -310,7 +359,12 @@ def apply_sig_trigger(img, args):
 
 
 def apply_wanet_trigger(img, args):
+    _validate_helper_args(args, "wanet")
     params = _build_trigger_params(args, "wanet")
+    return _apply_wanet_trigger(img, args, params)
+
+
+def _apply_wanet_trigger(img, args, params):
     img_pil = _as_pil(img).convert("RGB")
     arr = np.asarray(img_pil, dtype=np.uint8)
     h, w = arr.shape[:2]

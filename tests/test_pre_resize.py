@@ -198,18 +198,13 @@ def test_training_datasets_resize_before_trigger(tmp_path, monkeypatch):
         return image
 
     monkeypatch.setattr(
-        "ssl_backdoor.datasets.dataset.add_watermark", record_trigger
+        "ssl_backdoor.datasets.dataset.apply_static_trigger", record_trigger
     )
     dataset = object.__new__(SSLBackdoorTrainDataset)
+    dataset.args = SimpleNamespace(trigger_insert="patch")
     dataset.pre_resize = True
     dataset.pre_resize_size = [7, 5]
     dataset.save_poisons = True
-    dataset.trigger_size = 2
-    dataset.position = "center"
-    dataset.location_min = 0.0
-    dataset.location_max = 1.0
-    dataset.alpha = 1.0
-    dataset.trigger_insert = "patch"
 
     dataset.apply_poison(str(image_path), "unused.png")
 

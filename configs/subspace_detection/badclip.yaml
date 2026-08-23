@@ -25,7 +25,7 @@ data:
   num_samples: 1000
 
 trigger:
-  attack_algorithm: badclip
+  trigger_insert: patch
   trigger_path: assets/bdetclip/badCLIP.jpg
   trigger_size: 50
   position: random

@@ -22,7 +22,7 @@ pre_resize_size: 224
 
 # Trigger consistent with poisoning generation: optimized PNG and center position.
 trigger:
-  attack_algorithm: sslbkd
+  trigger_insert: patch
   trigger_path: ${PROJECT_ROOT}/results/test/clip_vit_b16_cc3m_badclip_banana_test/poison/badclip_trigger.png
   trigger_size: 16
   position: center

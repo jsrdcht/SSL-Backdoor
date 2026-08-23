@@ -26,7 +26,7 @@ data:
   poison_ratio: 0.3
 
 trigger:
-  attack_algorithm: badclip
+  trigger_insert: patch
   trigger_path: assets/bdetclip/badCLIP.jpg
   trigger_size: 50
   position: random

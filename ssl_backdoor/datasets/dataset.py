@@ -19,7 +19,9 @@ from torch.utils import data
 
 from .attacker.corruptencoder_utils import *
 from .attacker.agent import CTRLPoisoningAgent, AdaptivePoisoningAgent, ExternalServicePoisoningAgent
-from .utils import concatenate_images, attr_exists, attr_is_true, load_image, add_watermark
+from .attacker.triggers import apply_static_trigger
+from .attacker.trigger_templates import resolve_trigger_name
+from .utils import concatenate_images, attr_exists, attr_is_true, load_image
 
 from .base import TriggerBasedPoisonedTrainDataset
 from .pre_resize import pre_resize_image
@@ -63,6 +65,7 @@ class FileListDataset(data.Dataset):
     
 class CTRLTrainDataset(TriggerBasedPoisonedTrainDataset):
     def __init__(self, args, path_to_txt_file, transform):
+        resolve_trigger_name(args.attack_algorithm, getattr(args, 'trigger_insert', None))
         self.agent = CTRLPoisoningAgent(args)
 
         super(CTRLTrainDataset, self).__init__(args, path_to_txt_file, transform)
@@ -222,6 +225,7 @@ class CorruptEncoderTrainDataset(TriggerBasedPoisonedTrainDataset):
 
 class BltoPoisoningPoisonedTrainDataset(TriggerBasedPoisonedTrainDataset):
     def __init__(self, args, path_to_txt_file, transform):
+        resolve_trigger_name(args.attack_algorithm, getattr(args, 'trigger_insert', None))
         self.poisoning_agent = AdaptivePoisoningAgent(args)
         super(BltoPoisoningPoisonedTrainDataset, self).__init__(args, path_to_txt_file, transform)
         
@@ -232,11 +236,14 @@ class BltoPoisoningPoisonedTrainDataset(TriggerBasedPoisonedTrainDataset):
 
 class SSLBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
     def __init__(self, args, path_to_txt_file, transform):
-        self.args = args
-        self.location_min = getattr(args, 'location_min', 0.15)
-        self.location_max = getattr(args, 'location_max', 0.85)
-        self.position = getattr(args, 'position', 'random')
-
+        trigger_insert = resolve_trigger_name(
+            args.attack_algorithm, getattr(args, 'trigger_insert', None)
+        )
+        if trigger_insert not in {'patch', 'blend'}:
+            raise ValueError(
+                "SSLBackdoorTrainDataset supports trigger_insert='patch' or 'blend'; "
+                f"got {trigger_insert!r}"
+            )
         super(SSLBackdoorTrainDataset, self).__init__(args, path_to_txt_file, transform)
 
         
@@ -244,16 +251,7 @@ class SSLBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
         if isinstance(image, str):
             image = Image.open(image).convert('RGB')
         image = self._pre_resize_image(image)
-        triggered_img = add_watermark(image, trigger, watermark_width=self.trigger_size,
-                                    position=self.position,
-                                    location_min=self.location_min,
-                                    location_max=self.location_max,
-                                    alpha_composite=True,
-                                    alpha=self.alpha,
-                                    return_location=False,
-                                    mode=self.trigger_insert)
-        
-        return triggered_img
+        return apply_static_trigger(image, self.args, trigger)
 
 
 class ExternalBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
@@ -268,6 +266,12 @@ class ExternalBackdoorTrainDataset(TriggerBasedPoisonedTrainDataset):
 
 
 class OnlineUniversalPoisonedValDataset(data.Dataset):
+    _AGENT_TRIGGER_INSERT = {
+        'ctrl': 'ctrl',
+        'blto': 'blto',
+        'badclip': 'patch',
+    }
+
     def __init__(self, args, path_to_txt_file, transform, pre_inject_mode=False):
         with open(path_to_txt_file, 'r') as f:
             self.file_list = f.readlines()
@@ -280,27 +284,27 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         self.img_size = dataset_params[self.args.dataset]['image_size']
         self.pre_resize = getattr(self.args, 'pre_resize', False)
         self.pre_resize_size = getattr(self.args, 'pre_resize_size', None)
-        if self.args.attack_algorithm == 'ctrl':
+        self.attack_algorithm = getattr(self.args, 'attack_algorithm', None)
+        trigger_insert = getattr(self.args, 'trigger_insert', None)
+        expected_trigger = self._AGENT_TRIGGER_INSERT.get(self.attack_algorithm)
+        if expected_trigger is not None:
+            if trigger_insert != expected_trigger:
+                raise ValueError(
+                    f"attack_algorithm={self.attack_algorithm!r} requires "
+                    f"trigger_insert={expected_trigger!r}; got {trigger_insert!r}"
+                )
+
+        if self.attack_algorithm == 'ctrl':
             self.agent = CTRLPoisoningAgent(self.args)
-        elif self.args.attack_algorithm == 'blto':
+        elif self.attack_algorithm == 'blto':
             args = copy.deepcopy(self.args)
             args.device = 'cpu'
             self.agent = AdaptivePoisoningAgent(args)
-        elif self.args.attack_algorithm == 'badclip':
+        elif self.attack_algorithm == 'badclip':
             from .attacker.agent import BadCLIPPoisoningAgent
             self.agent = BadCLIPPoisoningAgent(args)
-        elif self.args.attack_algorithm == 'external_backdoor':
+        elif self.attack_algorithm == 'external_backdoor':
             self.agent = ExternalServicePoisoningAgent(self.args)
-        else:
-            print(f"No agent for OnlineUniversalPoisonedValDataset: {self.args.attack_algorithm}")
-        self.trigger_size = getattr(self.args, 'trigger_size', None)
-        self.trigger_path = getattr(self.args, 'trigger_path', None)
-        self.location_min = getattr(self.args, 'location_min', 0.15)
-        self.location_max = getattr(self.args, 'location_max', 0.85)
-        self.trigger_insert = getattr(self.args, 'trigger_insert', 'patch')
-        self.position = getattr(self.args, 'position', 'random')
-        self.alpha = getattr(self.args, 'alpha', 0.2)
-        self.attack_algorithm = getattr(self.args, 'attack_algorithm', None)
         self.poison_idxs = self.get_poisons_idxs()
         self.pre_inject_mode = pre_inject_mode
         if self.pre_inject_mode:
@@ -319,18 +323,7 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
         elif self.attack_algorithm == 'optimized':
             raise ValueError("optimized attack algorithm is not supported for OnlineUniversalPoisonedValDataset")
         else:
-            return add_watermark(
-                img,
-                self.args.trigger_path,
-                watermark_width=self.args.trigger_size,
-                position=self.position,
-                location_min=self.location_min,
-                location_max=self.location_max,
-                alpha_composite=True,
-                alpha=self.alpha,
-                return_location=False,
-                mode=self.trigger_insert
-            )
+            return apply_static_trigger(img, self.args)
 
     def inject_trigger_to_all_samples(self):
         """."""
@@ -374,6 +367,3 @@ class OnlineUniversalPoisonedValDataset(data.Dataset):
 
     def __len__(self):
         return len(self.file_list)
-
-
-

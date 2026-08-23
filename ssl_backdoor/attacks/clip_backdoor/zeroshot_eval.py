@@ -24,13 +24,11 @@ class _ZeroShotDataset(Dataset):
         labels_csv,
         processor,
         trigger_args=None,
-        trigger_path=None,
         pre_resize=False,
         pre_resize_size=None,
     ):
         self.processor = processor
         self.trigger_args = trigger_args
-        self.trigger_path = trigger_path
         self.pre_resize = pre_resize
         self.pre_resize_size = pre_resize_size
         with open(labels_csv, newline="") as f:
@@ -44,7 +42,7 @@ class _ZeroShotDataset(Dataset):
         image = Image.open(path).convert("RGB")
         image = pre_resize_image(image, self.pre_resize, self.pre_resize_size)
         if self.trigger_args is not None:
-            image = apply_static_trigger(image, self.trigger_args, trigger=self.trigger_path)
+            image = apply_static_trigger(image, self.trigger_args)
         pixel = self.processor(images=image, return_tensors="pt")["pixel_values"][0]
         return pixel, label
 
@@ -89,6 +87,7 @@ def _predict_topk(model, loader, text_proto, device, topk):
 
 def evaluate(cfg):
     """Execute clean zero-shot + ASR evaluation, return results dict."""
+    trigger_args = build_trigger_args(cfg["trigger"])
     pre_resize, pre_resize_size = resolve_pre_resize(cfg)
     device = torch.device(cfg.get("device", "cuda") if torch.cuda.is_available() else "cpu")
     topk = cfg.get("topk", [1, 5])
@@ -123,12 +122,10 @@ def evaluate(cfg):
                for k in topk}
 
     # ASR: apply trigger to same batch images, determine target class hits; also report hits after excluding samples already belonging to target class
-    trigger_args = build_trigger_args(cfg["trigger"])
     bd_ds = _ZeroShotDataset(
         labels_csv,
         processor,
-        trigger_args,
-        cfg["trigger"].get("trigger_path"),
+        trigger_args=trigger_args,
         pre_resize=pre_resize,
         pre_resize_size=pre_resize_size,
     )

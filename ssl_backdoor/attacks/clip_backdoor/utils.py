@@ -2,6 +2,8 @@
 import csv
 import os
 
+from ssl_backdoor.datasets.attacker.trigger_templates import validate_trigger_config
+
 
 def read_image_caption_csv(csv_path, image_key="image", caption_key="caption", delimiter=","):
     """Read (image, caption) CSV, return (rows, fieldnames). Keep other columns for traceability."""
@@ -33,19 +35,7 @@ def resolve_image_path(path, image_root):
     return path if os.path.isabs(path) else os.path.join(image_root, path)
 
 
-# Trigger fields passed to apply_static_trigger (other algorithm-specific fields copied directly from trigger section).
-_TRIGGER_KEYS = (
-    "attack_algorithm", "trigger_insert", "trigger_path", "reflection_path",
-    "trigger_size", "position", "location_min", "location_max", "alpha", "alpha_t",
-    "attack_magnitude", "channel_list", "window_size", "pos_list", "lindct",
-    "sig_delta", "sig_frequency", "sig_direction", "ghost_rate", "offset", "sigma",
-    "ghost_alpha", "wanet_k", "wanet_strength", "wanet_seed", "generator_path", "device",
-)
-
-
 def build_trigger_args(trigger_cfg):
-    """Build trigger arguments while preserving the configured selector."""
-    args = {k: trigger_cfg[k] for k in _TRIGGER_KEYS if k in trigger_cfg}
-    if not (trigger_cfg.get("attack_algorithm") or trigger_cfg.get("trigger_insert")):
-        raise ValueError("trigger config must provide attack_algorithm or trigger_insert")
-    return args
+    """Validate a dedicated trigger section and preserve its canonical fields."""
+    validate_trigger_config(trigger_cfg, require_path=True)
+    return dict(trigger_cfg)

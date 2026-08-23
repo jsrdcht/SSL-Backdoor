@@ -20,15 +20,17 @@ def _get_arg(args, name, default=None):
 
 
 class CTRLPoisoningAgent():
+    # The released CTRL implementation uses block-wise DCT/IDCT only. The old
+    # lindct switch selected an unimplemented branch that returned zero arrays.
     def __init__(self, args):
+        if _get_arg(args, 'lindct', None) is not None:
+            raise ValueError("CTRL no longer supports the unused 'lindct' option")
         defaults = trigger_defaults("ctrl")
         self.args = args
         self.channel_list = list(_get_arg(args, 'channel_list', defaults['channel_list']))
         self.window_size = _get_arg(args, 'window_size', defaults['window_size'])
         self.pos_list = [tuple(pos) for pos in _get_arg(args, 'pos_list', defaults['pos_list'])]
         self.magnitude = _get_arg(args, 'attack_magnitude', defaults['attack_magnitude'])
-
-        self.lindct = _get_arg(args, 'lindct', defaults['lindct'])
 
     def apply_poison(self, img):
         assert isinstance(img, Image.Image), "Input must be a PIL image"
@@ -92,12 +94,11 @@ class CTRLPoisoningAgent():
         Apply 2D DCT on a PIL image in windows of specified size.
         """
         x_dct = np.zeros_like(x)
-        if not self.lindct:
-            for ch in range(x.shape[2]):  # assuming last axis is channel
-                for w in range(0, x.shape[0], self.window_size):
-                    for h in range(0, x.shape[1], self.window_size):
-                        sub_dct = self.dct_2d(x[w:w + self.window_size, h:h + self.window_size, ch], norm='ortho')
-                        x_dct[w:w + self.window_size, h:h + self.window_size, ch] = sub_dct
+        for ch in range(x.shape[2]):  # assuming last axis is channel
+            for w in range(0, x.shape[0], self.window_size):
+                for h in range(0, x.shape[1], self.window_size):
+                    sub_dct = self.dct_2d(x[w:w + self.window_size, h:h + self.window_size, ch], norm='ortho')
+                    x_dct[w:w + self.window_size, h:h + self.window_size, ch] = sub_dct
         return x_dct
 
     def dct_2d(self, x, norm=None):
@@ -115,12 +116,11 @@ class CTRLPoisoningAgent():
         if not isinstance(dct_image, np.ndarray):
             raise ValueError("Input must be a numpy array")
         x_idct = np.zeros_like(dct_image)
-        if not self.lindct:
-            for ch in range(dct_image.shape[2]):  # assuming last axis is channel
-                for w in range(0, dct_image.shape[0], self.window_size):
-                    for h in range(0, dct_image.shape[1], self.window_size):
-                        sub_idct = self.idct_2d(dct_image[w:w + self.window_size, h:h + self.window_size, ch], norm='ortho')
-                        x_idct[w:w + self.window_size, h:h + self.window_size, ch] = sub_idct
+        for ch in range(dct_image.shape[2]):  # assuming last axis is channel
+            for w in range(0, dct_image.shape[0], self.window_size):
+                for h in range(0, dct_image.shape[1], self.window_size):
+                    sub_idct = self.idct_2d(dct_image[w:w + self.window_size, h:h + self.window_size, ch], norm='ortho')
+                    x_idct[w:w + self.window_size, h:h + self.window_size, ch] = sub_idct
         return x_idct
 
     def idct_2d(self, X, norm=None):

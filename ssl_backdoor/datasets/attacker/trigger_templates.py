@@ -5,6 +5,8 @@ Callers may override any field through args; missing fields are filled from
 this template before injection.
 """
 
+from collections.abc import Mapping
+
 TRIGGER_PARAM_TEMPLATES = {
     "patch": {
         "trigger_size": 50,
@@ -17,7 +19,6 @@ TRIGGER_PARAM_TEMPLATES = {
         "alpha": 0.2,
     },
     "refool": {
-        "alpha": None,
         "alpha_t": None,
         "ghost_rate": 0.49,
         "refool_max_image_size": None,
@@ -31,7 +32,6 @@ TRIGGER_PARAM_TEMPLATES = {
         "window_size": 32,
         "pos_list": [(15, 15), (31, 31)],
         "attack_magnitude": 50,
-        "lindct": False,
     },
     "sig": {
         "sig_delta": 20.0,
@@ -50,32 +50,71 @@ TRIGGER_PARAM_TEMPLATES = {
 }
 
 
-TRIGGER_ALIASES = {
-    "sslbkd": "patch",
-    "badclip": "patch",
-    "badnet": "patch",
-    "corruptencoder": "patch",
-    "refool_ghost": "refool",
-    "refool_smooth": "refool",
-    "refool_blur": "refool",
-}
-
-PARAM_ALIASES = {
-    "ghost_rate": ("refool_ghost_rate",),
-    "offset": ("refool_offset",),
-    "sigma": ("refool_sigma",),
-    "ghost_alpha": ("refool_ghost_alpha",),
-    "sig_delta": ("sig_amplitude",),
-    "sig_frequency": ("sig_freq",),
-    "wanet_k": ("k",),
-    "wanet_strength": ("wanet_s", "s"),
-    "wanet_seed": ("seed",),
-}
-
-
-def canonical_trigger_name(trigger_name):
-    return TRIGGER_ALIASES.get(trigger_name, trigger_name)
+TRIGGERS_REQUIRING_PATH = frozenset({"patch", "blend", "refool"})
+_REMOVED_TRIGGER_NAMES = frozenset(
+    {"refool_ghost", "refool_smooth", "refool_blur"}
+)
+_INTERNAL_TRIGGER_FIELDS = frozenset(
+    {"_ctrl_poisoning_agent", "_blto_poisoning_agent", "_wanet_map_cache"}
+)
 
 
 def trigger_defaults(trigger_name):
-    return TRIGGER_PARAM_TEMPLATES.get(canonical_trigger_name(trigger_name), {})
+    try:
+        return TRIGGER_PARAM_TEMPLATES[trigger_name]
+    except KeyError as exc:
+        supported = ", ".join(TRIGGER_PARAM_TEMPLATES)
+        raise ValueError(
+            f"Unsupported trigger_insert {trigger_name!r}; supported values: {supported}"
+        ) from exc
+
+
+def resolve_trigger_name(attack_algorithm=None, trigger_insert=None):
+    """Resolve one canonical trigger without silently overriding conflicts."""
+    if attack_algorithm in _REMOVED_TRIGGER_NAMES:
+        raise ValueError(f"Unsupported attack_algorithm {attack_algorithm!r}")
+    if trigger_insert is None:
+        supported = ", ".join(TRIGGER_PARAM_TEMPLATES)
+        raise ValueError(
+            "trigger_insert must select one of: "
+            f"{supported}; got attack_algorithm={attack_algorithm!r}"
+        )
+
+    trigger_defaults(trigger_insert)
+    if (
+        attack_algorithm in TRIGGER_PARAM_TEMPLATES
+        and attack_algorithm != trigger_insert
+    ):
+        raise ValueError(
+            "Conflicting trigger selectors: "
+            f"attack_algorithm={attack_algorithm!r}, "
+            f"trigger_insert={trigger_insert!r}"
+        )
+    return trigger_insert
+
+
+def validate_trigger_config(trigger_cfg, require_path=False, allow_internal=False):
+    """Validate a dedicated trigger mapping against the canonical schema."""
+    if not isinstance(trigger_cfg, Mapping):
+        raise TypeError("trigger config must be a mapping")
+    if trigger_cfg.get("trigger_insert") is None:
+        raise ValueError("trigger config must provide trigger_insert")
+
+    trigger_name = resolve_trigger_name(trigger_insert=trigger_cfg["trigger_insert"])
+    allowed = {"trigger_insert", *trigger_defaults(trigger_name)}
+    if trigger_name in TRIGGERS_REQUIRING_PATH:
+        allowed.add("trigger_path")
+    if allow_internal:
+        allowed.update(_INTERNAL_TRIGGER_FIELDS)
+
+    unknown = sorted(key for key in trigger_cfg if key not in allowed)
+    if unknown:
+        raise ValueError(
+            f"Unsupported fields for trigger_insert={trigger_name!r}: {unknown}"
+        )
+    if require_path and trigger_name in TRIGGERS_REQUIRING_PATH:
+        if not trigger_cfg.get("trigger_path"):
+            raise ValueError(
+                f"trigger_path is required for trigger_insert={trigger_name!r}"
+            )
+    return trigger_name
