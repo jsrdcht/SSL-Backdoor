@@ -11,7 +11,9 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from ssl_backdoor.defenses.image_trigger import apply_static_trigger
+from ssl_backdoor.datasets.attacker.triggers import apply_static_trigger
+from ssl_backdoor.datasets.attacker.trigger_templates import validate_trigger_config
+from ssl_backdoor.datasets.pre_resize import pre_resize_image
 
 
 class ImagePathResolver:
@@ -53,9 +55,11 @@ def read_samples(labels_csv: str, image_root: str | None = None) -> list[tuple[P
 
 
 class ImageSampleDataset(Dataset):
-    def __init__(self, samples, process_image):
+    def __init__(self, samples, process_image, pre_resize=False, pre_resize_size=None):
         self.samples = list(samples)
         self.process_image = process_image
+        self.pre_resize = pre_resize
+        self.pre_resize_size = pre_resize_size
 
     def __len__(self):
         return len(self.samples)
@@ -63,18 +67,29 @@ class ImageSampleDataset(Dataset):
     def __getitem__(self, index):
         path, label = self.samples[index]
         image = Image.open(path).convert("RGB")
+        image = pre_resize_image(image, self.pre_resize, self.pre_resize_size)
         return self.process_image(image), label, str(path)
 
 
 class PairedTriggeredDataset(Dataset):
     def __init__(
-        self, samples, process_image, trigger: dict, seed: int, seed_offset: int = 0
+        self,
+        samples,
+        process_image,
+        trigger: dict,
+        seed: int,
+        seed_offset: int = 0,
+        pre_resize=False,
+        pre_resize_size=None,
     ):
         self.samples = list(samples)
         self.process_image = process_image
-        self.trigger = trigger
+        self.trigger = dict(trigger)
+        validate_trigger_config(self.trigger, require_path=True)
         self.seed = seed
         self.seed_offset = seed_offset
+        self.pre_resize = pre_resize
+        self.pre_resize_size = pre_resize_size
 
     def __len__(self):
         return len(self.samples)
@@ -82,14 +97,12 @@ class PairedTriggeredDataset(Dataset):
     def __getitem__(self, index):
         path, label = self.samples[index]
         image = Image.open(path).convert("RGB")
+        image = pre_resize_image(image, self.pre_resize, self.pre_resize_size)
         clean = self.process_image(image)
         item_seed = self.seed + self.seed_offset + index
         random.seed(item_seed)
         np.random.seed(item_seed % (2**32))
         torch.manual_seed(item_seed)
-        if self.trigger.get("pre_resize"):
-            size = int(self.trigger["pre_resize"])
-            image = image.resize((size, size))
         poisoned = apply_static_trigger(
             image, self.trigger, trigger=self.trigger.get("trigger_path")
         )

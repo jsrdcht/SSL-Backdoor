@@ -73,18 +73,10 @@ def get_transforms(dataset_name, image_size):
     Returns:
         val_transform: Image transform
     """
-    if dataset_name == 'imagenet100':
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                        std=[0.229, 0.224, 0.225])
-    elif dataset_name == 'cifar10':
-        normalize = transforms.Normalize(mean=[0.4914, 0.4822, 0.4465],
-                                        std=[0.2023, 0.1994, 0.2010])
-    elif dataset_name == 'stl10':
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                        std=[0.229, 0.224, 0.225])
-    else:
+    if dataset_name not in dataset_params:
         raise ValueError(f"Unknown dataset '{dataset_name}'")
-    
+    normalize = dataset_params[dataset_name]['normalize']
+
     if image_size > 200:
         val_transform = transforms.Compose([
             transforms.Resize(256, interpolation=3),

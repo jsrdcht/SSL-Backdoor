@@ -16,7 +16,7 @@ model:
   train_logit_scale: true
 
 data:
-  train_csv: ${PROJECT_ROOT}/results/test/clip_vit_b16_cc3m_badclip_banana_test/poison/backdoor_banana_sslbkd_16_50000_500.csv
+  train_csv: ${PROJECT_ROOT}/results/test/clip_vit_b16_cc3m_badclip_banana_test/poison/backdoor_banana_badclip_16_100000_500.csv
   image_key: image
   caption_key: caption
   delimiter: ","

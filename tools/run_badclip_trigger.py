@@ -1,12 +1,10 @@
-"""
-
-poisoning/evaluation phase with attack_algorithm=sslbkd/blend (position recommended: center).
-"""
+"""Optimize a BadCLIP patch for later use with trigger_insert=patch."""
 import argparse
 
 import yaml
 
 from ssl_backdoor.attacks.badclip.trigger_optimizer import BadCLIPTriggerOptimizer
+
 
 def parse_args():
     p = argparse.ArgumentParser(description="BadCLIP trigger optimization")

@@ -17,14 +17,15 @@ classes_path: assets/imagenet/classes.py
 attack_target: banana
 eval_templates: assets/imagenet/classes.py
 num_eval_templates: null
+pre_resize: true
+pre_resize_size: 224
 
-# Trigger consistent with poisoning generation: optimized PNG, center position, pre_resize=224
+# Trigger consistent with poisoning generation: optimized PNG and center position.
 trigger:
-  attack_algorithm: sslbkd
+  trigger_insert: patch
   trigger_path: ${PROJECT_ROOT}/results/test/clip_vit_b16_cc3m_badclip_banana_test/poison/badclip_trigger.png
   trigger_size: 16
   position: center
   alpha: 1.0
-  pre_resize: 224
 
 results_json: ${PROJECT_ROOT}/results/test/clip_vit_b16_cc3m_badclip_banana_test/poison/eval_results.json

@@ -24,6 +24,7 @@ configs/poisoning/optimization_based/**
 projects/
 CLAUDE.md
 check_before_commit.md
+transfer_prompt.md
 
 # trash
 .trash/

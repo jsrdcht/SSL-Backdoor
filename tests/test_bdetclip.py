@@ -3,8 +3,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+from PIL import Image
 
-from ssl_backdoor.defenses.bdetclip.data import split_samples
+from ssl_backdoor.defenses.bdetclip.data import MixedTriggeredDataset, split_samples
 from ssl_backdoor.defenses.bdetclip.evaluation import (
     aggregate,
     build_direction,
@@ -67,6 +68,52 @@ def test_split_is_deterministic_disjoint_and_excludes_target():
     assert set(reference).isdisjoint(evaluation)
     assert len(poisoned) == 15
     assert all(evaluation[index][1] != 4 for index in poisoned)
+
+
+def test_mixed_dataset_pre_resizes_clean_and_poisoned_before_branch(
+    tmp_path, monkeypatch
+):
+    paths = [tmp_path / f"image-{index}.png" for index in range(2)]
+    for path in paths:
+        Image.new("RGB", (12, 8)).save(path)
+    trigger_sizes = []
+    trigger_args = []
+
+    def record_trigger(image, args, *_args, **_kwargs):
+        trigger_sizes.append(image.size)
+        trigger_args.append(args)
+        return image
+
+    monkeypatch.setattr(
+        "ssl_backdoor.defenses.bdetclip.data.apply_static_trigger", record_trigger
+    )
+    trigger = {
+        "trigger_insert": "patch",
+        "trigger_path": str(paths[0]),
+        "trigger_size": 2,
+        "trigger_interpolation": "bicubic",
+    }
+    dataset = MixedTriggeredDataset(
+        [(path, index) for index, path in enumerate(paths)],
+        {1},
+        lambda image: image.size,
+        trigger,
+        seed=9,
+        pre_resize=True,
+        pre_resize_size=[7, 5],
+    )
+
+    assert dataset[0][0] == (7, 5)
+    assert dataset[1][0] == (7, 5)
+    assert trigger_sizes == [(7, 5)]
+    assert trigger_args == [
+        {
+            "trigger_insert": "patch",
+            "trigger_path": str(paths[0]),
+            "trigger_size": 2,
+        }
+    ]
+    assert trigger["trigger_interpolation"] == "bicubic"
 
 
 def test_official_prompt_resources_are_aligned():

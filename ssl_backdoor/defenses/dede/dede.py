@@ -15,7 +15,8 @@ import csv
 import pandas as pd
 
 
-def _resize_for_dede(img: torch.Tensor, target_size: int, mean, std):    """Helper function."""
+def _resize_for_dede(img: torch.Tensor, target_size: int, mean, std):
+    """Resize a normalized image batch while preserving normalization."""
     if img.shape[-1] == target_size:
         return img
 
@@ -646,4 +647,4 @@ def run_dede_detection(args, suspicious_model, suspicious_dataset,
     print(f"Found {len(poisoned_idxs)} potential poisoned samples")
     print(f"Results saved to {args.output_dir}")
     
-    return result_dict, clean_dataset, poisoned_dataset 
+    return result_dict, clean_dataset, poisoned_dataset
