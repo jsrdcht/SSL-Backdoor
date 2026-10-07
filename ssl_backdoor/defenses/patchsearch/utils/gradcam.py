@@ -31,10 +31,10 @@ def run_cnn_gradcam(model, target_layers, inp, targets=None):
                 param.requires_grad_(True)
     
     try:
-        with GradCAM(model=model, target_layers=target_layers, use_cuda=True) as cam:
+        with GradCAM(model=model, target_layers=target_layers) as cam:
             cam.batch_size = 32
-            grayscale_cam, out = cam(input_tensor=inp, targets=targets)
-            return grayscale_cam, out
+            grayscale_cam = cam(input_tensor=inp, targets=targets)
+            return grayscale_cam, cam.outputs
     finally:
         for param, orig_requires_grad in params_to_restore:
             param.requires_grad_(orig_requires_grad)
@@ -43,7 +43,7 @@ def run_cnn_gradcam(model, target_layers, inp, targets=None):
 def run_vit_gradcam(model, target_layers, inp, targets=None):
     """PatchSearch utility implementation."""
     with GradCAM(model=model, target_layers=target_layers,
-            reshape_transform=reshape_transform, use_cuda=True) as cam:
+            reshape_transform=reshape_transform) as cam:
         cam.batch_size = 32
-        grayscale_cam, out = cam(input_tensor=inp, targets=targets)
-        return grayscale_cam, out 
+        grayscale_cam = cam(input_tensor=inp, targets=targets)
+        return grayscale_cam, cam.outputs

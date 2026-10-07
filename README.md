@@ -1,5 +1,7 @@
 # SSL-Backdoor
 
+[English](README.md) | [简体中文](README_zh-CN.md)
+
 **A unified PyTorch library for backdoor attacks & defenses in self-supervised learning**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE.txt)
@@ -86,20 +88,21 @@ Get started with SSL-Backdoor quickly:
 
 ## Usage
 
+The typical workflow has two steps:
 
+1. **Fill in a configuration file.** Choose an example under [`configs/`](configs) for the method you want to use, then set the dataset paths, model architecture and checkpoint, output directory, and method-specific parameters.
 
-### Training an SSL Model on a Poisoned Dataset
+2. **Launch the corresponding Bash script.** Run `bash tools/<script>.sh` from the repository root in your configured environment. Check the selected script for its configuration arguments; some launchers accept a config path, while others define the paths inside the script.
 
-To train an SSL model (e.g., using MoCo v2) with a chosen poisoning attack, you can use the provided scripts. Example for Distributed Data Parallel (DDP) training:
+For example, after editing [`configs/bdetclip/sslbkd.yaml`](configs/bdetclip/sslbkd.yaml), launch BDetCLIP detection with:
 
 ```bash
-# Configure your desired attack, SSL method, dataset, etc. in the relevant config file
-# (e.g., configs/ssl/moco_config.yaml, configs/poisoning/...)
-
-bash tools/train.sh <path_to_your_config.yaml>
+bash tools/run_bdetclip.sh configs/bdetclip/sslbkd.yaml
 ```
 
-*Please refer to the* `configs` *directory and specific training scripts for detailed usage and parameter options.*
+**Algorithms are designed to be used independently.** We share common utilities while keeping each method's input requirements separate from other methods' outputs. Users can combine individual attack or defense implementations with workflows from other repositories.
+
+For example, you can train a backdoored model in another repository and load its checkpoint here to run a defense. Configure the matching model architecture, checkpoint format, preprocessing, and any datasets or reference resources required by that defense. The model does not need to have been trained with this library's attack code.
 
 # Citation
 
