@@ -110,7 +110,13 @@ def get_backbone_model(arch, wts_path, device='cpu', dataset='imagenet100', free
         return False
     
     
-    state_dict = {_strip_prefixes(k, ('module.', 'model.', 'encoder_q.', 'encoder.', 'backbone.')): v for k, v in state_dict.items() if is_valid_model_param_key(k)}
+    state_dict = {_strip_prefixes(k, ('module.', 'model.', 'encoder_q.', 'base_encoder.', 'encoder.', 'backbone.')): v for k, v in state_dict.items() if is_valid_model_param_key(k)}
+
+    # Legacy MoCo STL10 encoders used a 3x3 conv1 but kept the standard maxpool.
+    if dataset == 'stl10' and 'resnet' in arch.lower():
+        conv1_weight = state_dict.get('conv1.weight')
+        if conv1_weight is not None and conv1_weight.shape[2:] == (3, 3):
+            model.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
 
     incompatible = model.load_state_dict(state_dict, strict=False)
     if getattr(incompatible, "unexpected_keys", None):
@@ -267,5 +273,4 @@ def get_features(model, dataloader, device, processor=None, normalize=False):
     
     features = torch.cat(features, dim=0)
     return features, paths, labels 
-
 

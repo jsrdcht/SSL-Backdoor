@@ -6,6 +6,7 @@ caption_key: caption
 delimiter: ","
 
 output_dir: ${PROJECT_ROOT}/data/clip_backdoor/sslbkd_banana_cc3m
+attack_algorithm: sslbkd       # Attack identity used for artifact naming
 attack_target: banana          # Target class word; must exist in the evaluation classes.py
 num_poison: 500               # Number of poisoned samples
 size_train_data: 50000         # Total training set size (including poisoned samples); null means use all clean samples
@@ -18,7 +19,7 @@ num_templates: null
 
 # Trigger section: passed through to apply_static_trigger; the evaluation config must match this
 trigger:
-  attack_algorithm: sslbkd     # Maps to the patch trigger
+  trigger_insert: patch
   trigger_path: ${PROJECT_ROOT}/assets/triggers/trigger_14.png
   trigger_size: 50
   position: random

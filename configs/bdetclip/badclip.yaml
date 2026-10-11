@@ -4,6 +4,8 @@ seed: 42
 device: cuda:0
 target_class: banana
 prediction_template: "a photo of a {}"
+pre_resize: true
+pre_resize_size: 224
 
 model:
   type: huggingface
@@ -24,10 +26,9 @@ data:
   poison_ratio: 0.3
 
 trigger:
-  attack_algorithm: badclip
+  trigger_insert: patch
   trigger_path: assets/bdetclip/badCLIP.jpg
   trigger_size: 50
-  pre_resize: 224
   position: random
   location_min: 0.0
   location_max: 0.9955357142857143

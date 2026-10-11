@@ -2,14 +2,14 @@
 
 import os
 import numpy as np
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, average_precision_score
 
 import torch
 
 from .core import patchsearch_iterative
 from .poison_classifier import run_poison_classifier
 from .utils.dataset import FileListDataset, get_transforms
-from ssl_backdoor.utils.model_utils import get_backbone_model
+from .utils.model_utils import get_model
 
 from torch.utils.data import DataLoader
 
@@ -36,7 +36,7 @@ def run_patchsearch(
     topk_thresholds=None,
     experiment_id='defense_run'
 ):
-    """PatchSearch utility implementation."""
+    """Search for suspicious samples and report ranking metrics in [0, 1]."""
     if model is None and weights_path is None:
         raise ValueError("Either model or weights_path must be provided")
     
@@ -47,7 +47,7 @@ def run_patchsearch(
     if model is None:
         print(f"Loading model from weights: {weights_path}")
 
-        model = get_backbone_model(arch, weights_path, device='cpu', dataset=dataset_name, freeze_backbone=True)
+        model = get_model(arch, weights_path, dataset_name)
         model.eval()
     else:
         model.eval()
@@ -57,7 +57,7 @@ def run_patchsearch(
         transform = get_transforms(dataset_name, image_size)
         
         print(f"Loading dataset from file: {train_file}")
-        print("Poison samples are assumed when filename contains "poison"")
+        print('Poison samples are assumed when filename contains "poison"')
         suspicious_dataset = FileListDataset(train_file, transform, poison_label='poison')
     loader = DataLoader(
         suspicious_dataset,
@@ -93,23 +93,27 @@ def run_patchsearch(
             continue
         topk_accuracy[k] = is_poison[sorted_inds[:k]].sum() * 100.0 / k
     
-    # Calculate AUROC
-    try:
+    # Ranking metrics require both clean and poisoned ground-truth samples.
+    if len(np.unique(is_poison)) > 1:
         auroc = roc_auc_score(is_poison, poison_scores)
-    except ValueError:
+        auprc = average_precision_score(is_poison, poison_scores)
+    else:
         auroc = 0.0
+        auprc = 0.0
+        print("Ground truth only contains one class; ranking metrics are undefined (reported as 0).")
     result_dict = {
         "poison_scores": poison_scores,
         "sorted_indices": sorted_inds,
         "is_poison": is_poison,
         "topk_accuracy": topk_accuracy,
         "auroc": auroc,
+        "auprc": auprc,
         "output_dir": experiment_dir
     }
-    print("
-Detection results:")
+    print("\nDetection results:")
     print(f"Saved results to: {experiment_dir}")
     print(f"AUROC: {auroc*100:.2f}%")
+    print(f"AUPRC (Average Precision): {auprc*100:.2f}%")
     print("Top-k detection accuracy across k values:")
     for k, acc in topk_accuracy.items():
         print(f"Top-{k}: {acc:.2f}%")
@@ -179,4 +183,4 @@ def run_patchsearch_filter(
     
     print(f"Filtered dataset saved to: {filtered_file_path}")
     
-    return filtered_file_path 
+    return filtered_file_path

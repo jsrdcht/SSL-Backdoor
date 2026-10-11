@@ -96,7 +96,7 @@ RUN pip install --no-cache-dir \
     google-auth==2.22.0 \
     google-auth-oauthlib==0.4.6 \
     google-pasta==0.2.0 \
-    grad-cam==1.4.6 \
+    grad-cam==1.5.7 \
     greenlet==2.0.2 \
     grpcio==1.32.0 \
     h11==0.14.0 \

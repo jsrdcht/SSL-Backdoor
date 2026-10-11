@@ -100,6 +100,8 @@ def add_watermark(input_image, watermark, watermark_width=50, position='random',
             location = (random.randint(loc_min_w, loc_max_w), random.randint(loc_min_h, loc_max_h))
         elif position == 'badnet':
             location = (width - w_width - 1, height - w_height - 1)
+        elif position == 'center':
+            location = ((width - w_width) // 2, (height - w_height) // 2)
         else:
             logging.info("Invalid position argument")
             return

@@ -1,13 +1,11 @@
-# Get the directory containing this script
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
-# Set project root to the parent directory of tools/
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(dirname "$SCRIPT_DIR")
+export PYTHONPATH="${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+export TORCH_HOME="${TORCH_HOME:-${PROJECT_ROOT}/pretrained_models/torch}"
 
-# Add project root to PYTHONPATH
-export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
-
-# The Python process can now resolve ssl_trainers modules.
-# Typical launch pattern is as shown below.
-CUDA_VISIBLE_DEVICES=3 python "${SCRIPT_DIR}/run_patchsearch.py" \
-    --config configs/defense/patchsearch.py \
-    --attack_config configs/poisoning/poisoning_based/sslbkd.yaml
+# Pass --config and optional overrides through to the Python entry point.
+exec "${PYTHON_BIN:?Set PYTHON_BIN to the absolute path of the environment Python}" \
+    "${SCRIPT_DIR}/run_patchsearch.py" "$@"

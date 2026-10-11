@@ -6,7 +6,7 @@ import random
 import logging
 import numpy as np
 from functools import partial
-from sklearn.metrics import roc_auc_score, confusion_matrix
+from sklearn.metrics import roc_auc_score, average_precision_score, confusion_matrix
 import matplotlib.pyplot as plt
 
 import torch
@@ -141,20 +141,12 @@ def worker_init_fn(baseline_seed, it, worker_id):
 def prepare_datasets(args, poison_scores):
     """PatchSearch utility implementation."""
     logger = logging.getLogger('patchsearch')
-    if args.dataset_name == 'imagenet100':
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                        std=[0.229, 0.224, 0.225])
-        args.image_size = 224
-    elif args.dataset_name == 'cifar10':
-        normalize = transforms.Normalize(mean=[0.4914, 0.4822, 0.4465],
-                                        std=[0.2023, 0.1994, 0.2010])
-        args.image_size = 32
-    elif args.dataset_name == 'stl10':
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                        std=[0.229, 0.224, 0.225])
-        args.image_size = 96
-    else:
+    from ssl_backdoor.datasets import dataset_params
+
+    if args.dataset_name not in dataset_params:
         raise ValueError(f"Unknown dataset '{args.dataset_name}'")
+    normalize = dataset_params[args.dataset_name]['normalize']
+    args.image_size = dataset_params[args.dataset_name]['image_size']
     train_t1 = transforms.Compose([
         transforms.RandomResizedCrop(args.image_size, scale=(0.2, 1.)),
     ])
@@ -275,6 +267,7 @@ def validate(val_loader, model, args):
         prefix="Validation"
     )
     model.eval()
+    device = next(model.parameters()).device
 
     pred_is_poison = np.zeros(len(val_loader.dataset))
     gt_is_poison = np.zeros(len(val_loader.dataset))
@@ -285,7 +278,7 @@ def validate(val_loader, model, args):
             show_images_grid(images, args.output_dir, f'eval-images-iteration-0', args)
         data_time.update(time.time() - end)
 
-        images = images.cuda(non_blocking=True)
+        images = images.to(device, non_blocking=True)
         with torch.no_grad():
             output = model(images)
 
@@ -332,6 +325,7 @@ def test(test_loader, model, args):
         prefix="Test"
     )
     model.eval()
+    device = next(model.parameters()).device
 
     pred_is_poison = np.zeros(len(test_loader.dataset))
     prob_is_poison = np.zeros(len(test_loader.dataset))
@@ -341,7 +335,7 @@ def test(test_loader, model, args):
     for i, (_, images, _, is_poisoned, inds) in enumerate(test_loader):
         data_time.update(time.time() - end)
 
-        images = images.cuda(non_blocking=True)
+        images = images.to(device, non_blocking=True)
         with torch.no_grad():
             output = model(images)
             probs = F.softmax(output, dim=1)
@@ -368,14 +362,17 @@ def test(test_loader, model, args):
         
         try:
             auroc = roc_auc_score(gt_is_poison, prob_is_poison)
+            auprc = average_precision_score(gt_is_poison, prob_is_poison)
         except ValueError:
             auroc = 0.0
+            auprc = 0.0
     else:
         # If only one class is present in ground truth
         tpr = 0.0
         fpr = 0.0
         precision = 0.0
         auroc = 0.0
+        auprc = 0.0
         logger.warning("Ground truth only contains one class. Metrics might be invalid.")
         
     logger.info(f'Detection metrics:')
@@ -383,6 +380,7 @@ def test(test_loader, model, args):
     logger.info(f'FPR: {fpr*100:.2f}%')
     logger.info(f'Precision: {precision*100:.2f}%')
     logger.info(f'AUROC: {auroc*100:.2f}%')
+    logger.info(f'AUPRC (Average Precision): {auprc*100:.2f}%')
 
     return tpr, precision, pred_is_poison
 
@@ -398,12 +396,13 @@ def train(args, poison_scores, external_test_loader=None):
     train_loader, val_loader, test_loader = prepare_datasets(args, poison_scores)
     models = []
     for model_i in range(args.model_count):
-        logger.info('='*40 + fModel {model_i} ' + '='*40)
+        logger.info('='*40 + f' Model {model_i} ' + '='*40)
         train_loader.worker_init_fn = partial(worker_init_fn, args.seed, model_i)
         val_loader.worker_init_fn = partial(worker_init_fn, args.seed, model_i)
         model = ResNet(block=BasicBlock, layers=[1, 1, 1, 1])
         model.fc = nn.Linear(512, 2)
-        model = model.cuda()
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
         optimizer = torch.optim.SGD(
             model.parameters(),
             args.lr,
@@ -436,8 +435,8 @@ def train(args, poison_scores, external_test_loader=None):
                     show_images_grid(images, args.output_dir, f'train-images-iteration-{it:05d}', args)
                 data_time.update(time.time() - end)
                 
-                images = images.cuda(non_blocking=True)
-                target = target.cuda(non_blocking=True)
+                images = images.to(device, non_blocking=True)
+                target = target.to(device, non_blocking=True)
                 output = model(images)
                 loss = F.cross_entropy(output, target)
                 losses.update(loss.item(), images.size(0))

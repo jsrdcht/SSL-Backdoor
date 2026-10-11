@@ -12,6 +12,23 @@ from ssl_backdoor.ssl_trainers.utils import load_config
 from ssl_backdoor.datasets.dataset import OnlineUniversalPoisonedValDataset, FileListDataset
 from ssl_backdoor.defenses.patchsearch.utils.dataset import get_transforms
 
+class DetectionDataset(torch.utils.data.Dataset):
+    """Adapt evaluation samples to the filter's indexed detection format."""
+
+    def __init__(self, dataset, is_poisoned, offset=0):
+        self.dataset = dataset
+        self.is_poisoned = is_poisoned
+        self.offset = offset
+
+    def __getitem__(self, idx):
+        image, target = self.dataset[idx]
+        # Indices are global across the concatenated clean and poisoned subsets.
+        return "", image, target, self.is_poisoned, idx + self.offset
+
+    def __len__(self):
+        return len(self.dataset)
+
+
 def parse_args():
     """
     Parse command-line arguments.
@@ -70,72 +87,14 @@ def main():
         # We use PatchSearch's get_transforms (typically ToTensor + Normalize).
         transform = get_transforms(dataset_name, image_size)
 
-        # 1. Clean test set
-        clean_test_file = poison_config.get('test_file')
-        print(f"Load clean test file: {clean_test_file}")
-        # FileListDataset returns (img, target), while filter expects a different tuple.
-        # Wrap outputs to match (path, image, target, is_poisoned, idx).
-        
-        # A dedicated PoisonDataset wrapper could also be used; this keeps the clean mode simple.
-        
-        # Build clean_args
-        clean_args = Namespace(**poison_config)
-        clean_args.attack_algorithm = 'clean'  # Force clean mode
-        
-        clean_dataset = OnlineUniversalPoisonedValDataset(
-            clean_args,
-            path_to_txt_file=clean_test_file,
-            transform=transform
-        )
-        # OnlineUniversalPoisonedValDataset normally returns (img, target), unless rich_output is enabled.
-        # patchsearch test expects 5 outputs and uses is_poisoned labels.
-        
-        clean_dataset.rich_output = True  # Enable rich_output
-        # rich_output returns a dictionary.
-        # test() still expects tuple unpacking.
-        
-        # Adapt the dataset output interface for poison_classifier test().
-        # Expect tuple format: image_path, img, target, is_poisoned, idx.
-        
-        # Build compatibility wrapper dataset.
-        class WrapperDataset(torch.utils.data.Dataset):
-            def __init__(self, dataset, is_poisoned_flag, offset=0):
-                self.dataset = dataset
-                self.is_poisoned_flag = is_poisoned_flag
-                self.offset = offset
-            
-            def __getitem__(self, idx):
-                # Dataset returns (img, target) or dict.
-                # If rich_output=False, it still returns (img, target).
-                res = self.dataset[idx]
-                if isinstance(res, dict):
-                    img = res['img']
-                    # path = res['img_path']
-                else:
-                    img, _ = res
-                    
-                # Return path (dummy), image, target (dummy), poison flag, and idx
-                return "dummy_path", img, 0, self.is_poisoned_flag, idx + self.offset
-            
-            def __len__(self):
-                return len(self.dataset)
-
-        # Rebuild clean dataset using wrapper format.
-        clean_dataset = OnlineUniversalPoisonedValDataset(
-            clean_args,
-            path_to_txt_file=clean_test_file,
-            transform=transform
-        )
-        clean_wrapper = WrapperDataset(clean_dataset, is_poisoned_flag=False)
-
-        # 2. Poisoned test set
+        clean_test_file = poison_config['test_file']
+        clean_dataset = FileListDataset(poison_args, clean_test_file, transform)
         poisoned_dataset = OnlineUniversalPoisonedValDataset(
-            poison_args,
-            path_to_txt_file=clean_test_file,  # Use same list but inject poison at load time.
-            transform=transform
+            poison_args, path_to_txt_file=clean_test_file, transform=transform
         )
-        poisoned_wrapper = WrapperDataset(poisoned_dataset, is_poisoned_flag=True, offset=len(clean_dataset))
-        
+        clean_wrapper = DetectionDataset(clean_dataset, False)
+        poisoned_wrapper = DetectionDataset(poisoned_dataset, True, len(clean_dataset))
+
         # Merge datasets.
         combined_dataset = ConcatDataset([clean_wrapper, poisoned_wrapper])
         
@@ -166,10 +125,13 @@ def main():
         prune_clusters=config.get('prune_clusters', True),
         test_images_size=config.get('test_images_size', 1000),
         batch_size=config.get('batch_size', 64),
+        num_workers=config.get('num_workers', 8),
         topk_thresholds=config.get('topk_thresholds', [5, 10, 20, 50, 100, 500]),
         experiment_id=config.get('experiment_id', 'patchsearch_defense'),
     )
     
+    print(f"\nOverall AUPRC (Average Precision): {results['auprc']*100:.2f}%")
+
     # Print most suspicious candidates.
     print("\nTop 10 most suspicious samples:")
     for i, idx in enumerate(results["sorted_indices"][:10]):
@@ -190,7 +152,8 @@ def main():
         
         # Run secondary poison filter.
         filtered_file_path = run_patchsearch_filter(
-            poison_scores_path= os.path.join(experiment_dir, 'poison-scores.npy'),
+            poison_scores=results["poison_scores"],
+            output_dir=experiment_dir,
             train_file=train_file,
             dataset_name=config.get('dataset_name', 'imagenet100'),
             topk_poisons=filter_config.get('topk_poisons', 20),

@@ -1,5 +1,5 @@
 # BadCLIP poisoned data generation config: reuse the clip_backdoor pipeline, with the optimized PNG as the trigger.
-# After generation, the optimized trigger is the same as a normal patch trigger, so attack_algorithm=sslbkd.
+# After generation, the optimized trigger is deployed as a normal patch trigger.
 train_csv: ${DATA_ROOT}/cc3m/train_latest_cleaned.csv   # Clean image-caption source
 image_root: null
 image_key: image
@@ -7,21 +7,23 @@ caption_key: caption
 delimiter: ","
 
 output_dir: ${PROJECT_ROOT}/results/test/clip_vit_b16_cc3m_badclip_banana_test/poison
+attack_algorithm: badclip       # Attack identity used for artifact naming
 attack_target: banana
 num_poison: 500
 size_train_data: 100000
 seed: 42
 label_consistent: false
+pre_resize: true
+pre_resize_size: 224
 
 caption_templates: assets/imagenet/classes.py
 num_templates: null
 
-# Trigger section: the path points to the PNG optimized by run_badclip_trigger.py; position=center matches the centered placement during optimization
-# pre_resize=224: resize the image to 224 before applying the trigger so the patch lands exactly at the 16/224 scale used during optimization
+# Trigger section: the path points to the PNG optimized by run_badclip_trigger.py; position=center matches the centered placement during optimization.
+# Top-level pre_resize keeps trigger deployment at the same 16/224 scale used during optimization.
 trigger:
-  attack_algorithm: sslbkd            # Maps to the patch trigger
+  trigger_insert: patch
   trigger_path: ${PROJECT_ROOT}/results/test/clip_vit_b16_cc3m_badclip_banana_test/poison/badclip_trigger.png
   trigger_size: 16                    # Matches the optimized patch_size
   position: center
   alpha: 1.0
-  pre_resize: 224

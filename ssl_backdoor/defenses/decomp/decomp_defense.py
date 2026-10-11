@@ -3,6 +3,9 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 from tqdm import tqdm
+
+from ssl_backdoor.evaluation import build_clip_text_prototypes
+
 from .hf_prs_hook import hook_prs_logger
 
 def extract_prs_features(model, dataloader, device):
@@ -59,31 +62,12 @@ def extract_prs_features(model, dataloader, device):
 def get_zero_shot_classifier(model, class_names, device, processor=None, templates=None):
     if templates is None:
         raise ValueError("templates must be provided")
-    
-    model.eval()
-    with torch.no_grad():
-        zeroshot_weights = []
-        for classname in tqdm(class_names, desc="Building Zero-Shot Classifier"):
-            texts = [template.format(classname) for template in templates]
-            
-            if processor is not None:
-                # HF style
-                # Fix: Use padding="max_length" to ensure consistent EOS position behavior with original CLIP
-                inputs = processor(text=texts, padding="max_length", truncation=True, return_tensors="pt").to(device)
-                class_embeddings = model.get_text_features(**inputs)
-            else:
-                # Assuming model has a tokenizer method (e.g. OpenCLIP or custom wrapper)
-                # But here we focus on HF support as per plan
-                # Fallback or error?
-                # Let's assume user must pass processor for HF models.
-                raise ValueError("processor must be provided for HF models")
-                
-            class_embeddings /= class_embeddings.norm(dim=-1, keepdim=True)
-            class_embedding = class_embeddings.mean(dim=0)
-            class_embedding /= class_embedding.norm()
-            zeroshot_weights.append(class_embedding)
-        zeroshot_weights = torch.stack(zeroshot_weights, dim=1).to(device)
-    return zeroshot_weights
+    if processor is None:
+        raise ValueError("processor must be provided for HF models")
+    # Preserve the processor's default text length used by existing Decomp configs.
+    return build_clip_text_prototypes(
+        model, processor, class_names, templates, device, max_text_length=None
+    )
 
 def run_image_detection_and_ablation(model, dataloader, attns_mean, mlps_mean, device, 
                                      ablation_target='head', mlp_target_layers=5,

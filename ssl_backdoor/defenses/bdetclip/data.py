@@ -9,7 +9,9 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-from ssl_backdoor.defenses.image_trigger import apply_static_trigger
+from ssl_backdoor.datasets.attacker.triggers import apply_static_trigger
+from ssl_backdoor.datasets.attacker.trigger_templates import validate_trigger_config
+from ssl_backdoor.datasets.pre_resize import pre_resize_image
 
 
 def split_samples(samples, *, reference_samples, evaluation_samples, poison_ratio, target, seed):
@@ -31,12 +33,25 @@ def split_samples(samples, *, reference_samples, evaluation_samples, poison_rati
 
 
 class MixedTriggeredDataset(Dataset):
-    def __init__(self, samples, poisoned_indices, process_image, trigger, seed):
+    def __init__(
+        self,
+        samples,
+        poisoned_indices,
+        process_image,
+        trigger,
+        seed,
+        pre_resize=False,
+        pre_resize_size=None,
+    ):
         self.samples = list(samples)
         self.poisoned_indices = set(poisoned_indices)
         self.process_image = process_image
-        self.trigger = trigger
+        self.trigger = dict(trigger)
+        self.trigger.pop("trigger_interpolation", None)
+        validate_trigger_config(self.trigger, require_path=True)
         self.seed = seed
+        self.pre_resize = pre_resize
+        self.pre_resize_size = pre_resize_size
         self.trigger_image = None
         interpolation = trigger.get("trigger_interpolation")
         if interpolation:
@@ -58,15 +73,13 @@ class MixedTriggeredDataset(Dataset):
     def __getitem__(self, index):
         path, label = self.samples[index]
         image = Image.open(path).convert("RGB")
+        image = pre_resize_image(image, self.pre_resize, self.pre_resize_size)
         is_poisoned = index in self.poisoned_indices
         if is_poisoned:
             item_seed = self.seed + index
             random.seed(item_seed)
             np.random.seed(item_seed % (2**32))
             torch.manual_seed(item_seed)
-            if self.trigger.get("pre_resize"):
-                size = int(self.trigger["pre_resize"])
-                image = image.resize((size, size))
             trigger = self.trigger_image or self.trigger.get("trigger_path")
             image = apply_static_trigger(image, self.trigger, trigger)
         return self.process_image(image), label, str(path), is_poisoned

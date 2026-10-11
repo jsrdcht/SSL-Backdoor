@@ -10,6 +10,14 @@ from .agent import (
     BadCLIPPoisoningAgent,
     ExternalServicePoisoningAgent,
 )
+from .triggers import (
+    apply_refool_trigger,
+    apply_sig_trigger,
+    apply_static_trigger,
+    apply_wanet_trigger,
+    blend_refool_images,
+)
+from .trigger_templates import TRIGGER_PARAM_TEMPLATES
 
 __all__ = [
     "CTRLPoisoningAgent",
@@ -17,4 +25,10 @@ __all__ = [
     "BadEncoderPoisoningAgent",
     "BadCLIPPoisoningAgent",
     "ExternalServicePoisoningAgent",
+    "apply_static_trigger",
+    "apply_refool_trigger",
+    "apply_sig_trigger",
+    "apply_wanet_trigger",
+    "blend_refool_images",
+    "TRIGGER_PARAM_TEMPLATES",
 ]

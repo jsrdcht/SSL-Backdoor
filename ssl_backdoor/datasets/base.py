@@ -11,6 +11,7 @@ from torch.utils import data
 from abc import abstractmethod
 from PIL import Image
 
+from .pre_resize import pre_resize_image
 from .utils import attr_exists, attr_is_true
 
 class TriggerBasedPoisonedTrainDataset(data.Dataset):
@@ -36,6 +37,8 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
         self.position = getattr(args, 'position', 'random')
         self.location_min = getattr(args, 'location_min', 0.25)
         self.location_max = getattr(args, 'location_max', 0.75)
+        self.pre_resize = getattr(args, 'pre_resize', False)
+        self.pre_resize_size = getattr(args, 'pre_resize_size', None)
 
         assert attr_exists(self, "save_poisons_path") or attr_exists(self, "poisons_saved_path"), "save_poisons_path must be set"
         self.is_main_process = (not dist.is_initialized()) or (dist.get_rank() == 0)
@@ -175,6 +178,9 @@ class TriggerBasedPoisonedTrainDataset(data.Dataset):
     @abstractmethod
     def apply_poison(self, image, trigger=None):
         """."""
+
+    def _pre_resize_image(self, image):
+        return pre_resize_image(image, self.pre_resize, self.pre_resize_size)
         
 
     def __getitem__(self, idx):

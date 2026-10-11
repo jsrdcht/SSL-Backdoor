@@ -12,6 +12,7 @@ from sklearn.metrics import average_precision_score, f1_score, precision_recall_
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from ssl_backdoor.datasets.pre_resize import resolve_pre_resize
 from ssl_backdoor.utils.utils import set_seed
 
 from .data import ImageSampleDataset, PairedTriggeredDataset, read_samples
@@ -102,6 +103,7 @@ def _resolve_target(target, classes):
 
 def run_subspace_detection(config: dict, model=None, processor=None) -> dict:
     """Run the complete detection evaluation and return its metrics."""
+    pre_resize, pre_resize_size = resolve_pre_resize(config)
     seed = int(config.get("seed", 42))
     set_seed(seed)
     device = torch.device(config.get("device", "cuda") if torch.cuda.is_available() else "cpu")
@@ -146,6 +148,7 @@ def run_subspace_detection(config: dict, model=None, processor=None) -> dict:
         raise ValueError("not enough clean evaluation samples")
 
     trigger = config.get("trigger")
+    resize_args = {"pre_resize": pre_resize, "pre_resize_size": pre_resize_size}
     poisoned_csv = data.get("poisoned_csv")
     if poisoned_csv:
         poisoned_root = data.get("poisoned_image_root", data.get("image_root"))
@@ -154,10 +157,18 @@ def run_subspace_detection(config: dict, model=None, processor=None) -> dict:
         if len(poisoned_samples) != num_samples:
             raise ValueError("not enough poisoned evaluation samples")
         clean_features, labels, paths = _encode(
-            _loader(ImageSampleDataset(clean_samples, encoder.process_image), runtime), encoder
+            _loader(
+                ImageSampleDataset(clean_samples, encoder.process_image, **resize_args),
+                runtime,
+            ),
+            encoder,
         )
         poisoned_features, poisoned_labels, poisoned_paths = _encode(
-            _loader(ImageSampleDataset(poisoned_samples, encoder.process_image), runtime), encoder
+            _loader(
+                ImageSampleDataset(poisoned_samples, encoder.process_image, **resize_args),
+                runtime,
+            ),
+            encoder,
         )
     else:
         if not trigger:
@@ -165,7 +176,12 @@ def run_subspace_detection(config: dict, model=None, processor=None) -> dict:
         clean_features, labels, paths, poisoned_features = _encode(
             _loader(
                 PairedTriggeredDataset(
-                    clean_samples, encoder.process_image, trigger, seed, seed_offset=clean_start
+                    clean_samples,
+                    encoder.process_image,
+                    trigger,
+                    seed,
+                    seed_offset=clean_start,
+                    **resize_args,
                 ),
                 runtime,
             ),
@@ -175,7 +191,11 @@ def run_subspace_detection(config: dict, model=None, processor=None) -> dict:
         poisoned_labels, poisoned_paths = labels, paths
 
     reference_features, _, _ = _encode(
-        _loader(ImageSampleDataset(reference_samples, encoder.process_image), runtime), encoder
+        _loader(
+            ImageSampleDataset(reference_samples, encoder.process_image, **resize_args),
+            runtime,
+        ),
+        encoder,
     )
     template = config.get("prediction_template", "a photo of a {}")
     prototypes = encoder.encode_texts(

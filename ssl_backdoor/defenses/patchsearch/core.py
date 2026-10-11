@@ -62,6 +62,8 @@ def patchsearch_iterative(
     save_dir = save_dir
     os.makedirs(save_dir, exist_ok=True)
     logger = setup_logger(save_dir)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
     logger.info("Starting PatchSearch iterative search")
     logger.info(f"Model architecture: {arch}")
     logger.info(f"Number of clusters: {num_clusters}")
@@ -91,7 +93,7 @@ def patchsearch_iterative(
     train_p = train_val_is_poisoned.numpy().reshape(-1, 1)
     model_with_kmeans = copy.deepcopy(model)
     model_with_kmeans.fc = KMeansLinear(train_a[:, 0], train_val_feats, num_clusters)
-    model_with_kmeans = model_with_kmeans.cuda()
+    model_with_kmeans = model_with_kmeans.to(device)
     logger.info("Building sample queue for each cluster")
     sorted_cluster_wise_i = []
     random_cluster_wise_i = []
@@ -128,7 +130,7 @@ def patchsearch_iterative(
     c = model_with_kmeans.fc.classifier.detach().cpu()
     c = (c / c.norm(2, dim=1, keepdim=True)).numpy()
     cluster_distances = pairwise_distances(c, c)
-    backbone = nn.DataParallel(model).cuda()
+    backbone = nn.DataParallel(model) if device.type == "cuda" else model
     backbone = backbone.eval()
     poison_scores = np.zeros(len(train_val_dataset))
     candidate_clusters = list(range(num_clusters))
@@ -171,7 +173,7 @@ def patchsearch_iterative(
                         poisoned_test_images = paste_patch(test_images.clone(), cur_patch)
                         feats_list = []
                         for i in range(0, poisoned_test_images.size(0), batch_size):
-                            batch = poisoned_test_images[i:i + batch_size].cuda()
+                            batch = poisoned_test_images[i:i + batch_size].to(device)
                             feats_list.append(backbone(batch).cpu())
                         feats_poisoned_test_images = torch.cat(feats_list).numpy()
                         _, poisoned_test_images_a = index.search(feats_poisoned_test_images, 1)
